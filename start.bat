@@ -222,7 +222,7 @@ if not exist "frontend\node_modules" (
 
 REM Start backend in new window
 echo Starting backend server...
-start "MedEase Backend" cmd /k "cd /d %CD%\backend & call venv\Scripts\activate.bat & python main.py"
+start "MedEase Backend" cmd /k "%~dp0run_backend.bat"
 echo [OK] Backend started in new window
 
 REM Wait a moment for backend to start
@@ -230,7 +230,7 @@ timeout /t 3 >nul
 
 REM Start frontend in new window
 echo Starting frontend server...
-start "MedEase Frontend" cmd /k "cd /d %CD%\frontend & npm run dev"
+start "MedEase Frontend" cmd /k "%~dp0run_frontend.bat"
 echo [OK] Frontend started in new window
 
 echo.
