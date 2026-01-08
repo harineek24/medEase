@@ -1,8 +1,6 @@
 @echo off
 REM MedEase EHR Summarizer - Startup Script (Windows)
-REM This script helps you set up and run the application
-
-setlocal enabledelayedexpansion
+setlocal
 
 :menu
 cls
@@ -36,7 +34,7 @@ echo.
 
 REM Check Python
 where python >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [ERROR] Python not found. Please install Python 3.9 or higher.
     echo Download from: https://www.python.org/downloads/
     pause
@@ -47,7 +45,7 @@ python --version
 
 REM Check Node.js
 where node >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [ERROR] Node.js not found. Please install Node.js 18 or higher.
     echo Download from: https://nodejs.org/
     pause
@@ -58,7 +56,7 @@ node --version
 
 REM Check npm
 where npm >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [ERROR] npm not found. Please install npm.
     pause
     goto menu
@@ -75,7 +73,7 @@ echo.
 cd backend
 
 REM Create virtual environment
-if not exist "venv" (
+if not exist venv (
     echo Creating Python virtual environment...
     python -m venv venv
     echo [OK] Virtual environment created
@@ -93,7 +91,7 @@ pip install -r requirements.txt
 echo [OK] Python dependencies installed
 
 REM Setup .env file
-if not exist ".env" (
+if not exist .env (
     echo.
     echo [WARNING] Setting up environment variables...
     copy .env.example .env >nul
@@ -129,7 +127,7 @@ echo [OK] Node.js dependencies installed
 cd ..
 
 REM Create outputs directory
-if not exist "outputs\summaries" mkdir outputs\summaries
+if not exist outputs\summaries mkdir outputs\summaries
 echo [OK] Outputs directory created
 
 echo.
@@ -153,23 +151,22 @@ echo    Starting Backend Server
 echo ============================================
 echo.
 
-if not exist "backend\.env" (
+cd backend
+if not exist .env (
     echo [ERROR] .env file not found. Please run setup first (option 1).
+    cd ..
     pause
     goto menu
 )
 
-cd backend
-
-if not exist "venv" (
+if not exist venv (
     echo [ERROR] Virtual environment not found. Please run setup first (option 1).
-    pause
     cd ..
+    pause
     goto menu
 )
 
 call venv\Scripts\activate.bat
-
 echo Starting FastAPI server on http://localhost:8000
 echo.
 python main.py
@@ -185,13 +182,13 @@ echo    Starting Frontend Server
 echo ============================================
 echo.
 
-if not exist "frontend\node_modules" (
+cd frontend
+if not exist node_modules (
     echo [ERROR] Node modules not found. Please run setup first (option 1).
+    cd ..
     pause
     goto menu
 )
-
-cd frontend
 
 echo Starting Vite dev server on http://localhost:3000
 echo.
@@ -208,17 +205,23 @@ echo    Starting MedEase Application
 echo ============================================
 echo.
 
-if not exist "backend\.env" (
+cd backend
+if not exist .env (
     echo [ERROR] .env file not found. Please run setup first (option 1).
+    cd ..
     pause
     goto menu
 )
+cd ..
 
-if not exist "frontend\node_modules" (
+cd frontend
+if not exist node_modules (
     echo [ERROR] Node modules not found. Please run setup first (option 1).
+    cd ..
     pause
     goto menu
 )
+cd ..
 
 REM Start backend in new window
 echo Starting backend server...
