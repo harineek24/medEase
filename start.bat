@@ -1,6 +1,5 @@
 @echo off
 REM MedEase EHR Summarizer - Startup Script (Windows)
-setlocal
 
 :menu
 cls
@@ -99,13 +98,8 @@ if not exist .env (
     echo Please enter your Gemini API key:
     echo Get your key from: https://aistudio.google.com/app/apikey
     set /p API_KEY="API Key: "
-
-    if not "!API_KEY!"=="" (
-        echo GEMINI_API_KEY=!API_KEY!> .env
-        echo [OK] .env file created with your API key
-    ) else (
-        echo [WARNING] .env file created, but you need to add your API key manually
-    )
+    echo GEMINI_API_KEY=%API_KEY%> .env
+    echo [OK] .env file created
 ) else (
     echo [WARNING] .env file already exists
 )
@@ -150,28 +144,9 @@ echo ============================================
 echo    Starting Backend Server
 echo ============================================
 echo.
-
-cd backend
-if not exist .env (
-    echo [ERROR] .env file not found. Please run setup first (option 1).
-    cd ..
-    pause
-    goto menu
-)
-
-if not exist venv (
-    echo [ERROR] Virtual environment not found. Please run setup first (option 1).
-    cd ..
-    pause
-    goto menu
-)
-
-call venv\Scripts\activate.bat
-echo Starting FastAPI server on http://localhost:8000
+start "MedEase Backend" cmd /k "%~dp0run_backend.bat"
+echo [OK] Backend started in new window
 echo.
-python main.py
-
-cd ..
 pause
 goto menu
 
@@ -181,20 +156,9 @@ echo ============================================
 echo    Starting Frontend Server
 echo ============================================
 echo.
-
-cd frontend
-if not exist node_modules (
-    echo [ERROR] Node modules not found. Please run setup first (option 1).
-    cd ..
-    pause
-    goto menu
-)
-
-echo Starting Vite dev server on http://localhost:3000
+start "MedEase Frontend" cmd /k "%~dp0run_frontend.bat"
+echo [OK] Frontend started in new window
 echo.
-call npm run dev
-
-cd ..
 pause
 goto menu
 
@@ -204,24 +168,6 @@ echo ============================================
 echo    Starting MedEase Application
 echo ============================================
 echo.
-
-cd backend
-if not exist .env (
-    echo [ERROR] .env file not found. Please run setup first (option 1).
-    cd ..
-    pause
-    goto menu
-)
-cd ..
-
-cd frontend
-if not exist node_modules (
-    echo [ERROR] Node modules not found. Please run setup first (option 1).
-    cd ..
-    pause
-    goto menu
-)
-cd ..
 
 REM Start backend in new window
 echo Starting backend server...
