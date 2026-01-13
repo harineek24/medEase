@@ -1,46 +1,65 @@
-# 🏥 MedEase - EHR Summarizer
+# 🏥 MedEase - Healthcare Analysis Platform
 
-Transform complex medical records into clear, patient-friendly summaries using AI.
+Transform complex medical records into clear summaries and analyze medication safety using AI.
 
 ## 📋 Overview
 
-MedEase is a full-stack web application that uses Google Gemini AI to convert Electronic Health Records (EHRs), lab reports, and medical documents into easy-to-understand summaries. Built for patients who want to understand their medical information without needing a medical degree.
+MedEase is a full-stack web application that combines AI-powered medical document analysis with comprehensive medication safety checking. Built for patients who want to understand their medical information and ensure their medications are safe to take together.
 
-### Key Features
+### 🌟 Core Features
 
-- 📄 **Multi-format Support**: Upload PDFs, PNGs, or JPG images of medical documents
-- 🤖 **AI-Powered**: Uses Google Gemini 1.5 Pro for accurate medical document analysis
-- 💬 **Plain English**: Converts medical jargon into language anyone can understand
-- 📝 **Automatic Markdown**: Saves summaries as organized markdown files
-- 🎨 **Beautiful UI**: Modern, responsive interface with drag-and-drop upload
-- 🔒 **Privacy Focused**: Documents are processed securely and not permanently stored
-- ⚡ **Fast**: Get summaries in 10-20 seconds
+#### 📄 EHR Summarizer
+- **Multi-format Support**: Upload PDFs, PNGs, or JPG images of medical documents
+- **AI-Powered Analysis**: Uses Google Gemini AI for accurate medical document interpretation
+- **Plain English Summaries**: Converts medical jargon into language anyone can understand
+- **Automatic Markdown Export**: Saves summaries as organized markdown files
+- **Fast Processing**: Get summaries in 10-20 seconds
+
+#### 💊 Drug Interaction Checker
+- **Drug-Drug Interactions**: Detects harmful interactions between medications
+- **Duplicate Therapy Detection**: Identifies redundant medications with the same purpose
+- **Side Effect Aggregation**: Analyzes cumulative side effects across all medications
+- **Dosage Validation**: Validates medication dosages against standard safe ranges
+- **Risk Assessment**: Provides overall risk level (low/moderate/high) analysis
+- **RxNorm Integration**: Uses official drug databases for accurate information
+
+#### 🎨 User Experience
+- Beautiful, responsive interface with drag-and-drop upload
+- Privacy-focused: Documents processed securely, not permanently stored
+- Comprehensive API for integration with other healthcare tools
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        User Browser                          │
-│                     (React + TypeScript)                     │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP/REST API
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│                    FastAPI Backend                           │
-│                    (Python 3.9+)                             │
-└────────────────────────┬────────────────────────────────────┘
-                         │ API Call
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│                  Google Gemini API                           │
-│                 (gemini-1.5-pro-latest)                      │
-└──────────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │   Markdown   │
-                  │    Files     │
-                  └──────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                        User Browser                           │
+│                     (React + TypeScript)                      │
+└─────────────────┬──────────────────────┬─────────────────────┘
+                  │                      │
+                  │ HTTP/REST API        │
+                  │                      │
+┌─────────────────▼──────────────────────▼─────────────────────┐
+│                    FastAPI Backend                            │
+│                    (Python 3.9+)                              │
+│  ┌──────────────────────┐   ┌────────────────────────────┐   │
+│  │  EHR Summarizer      │   │  Medication Analyzer       │   │
+│  │  - Document Upload   │   │  - Interaction Checker     │   │
+│  │  - AI Analysis       │   │  - Duplicate Detection     │   │
+│  │  - Markdown Export   │   │  - Side Effects Analysis   │   │
+│  └──────────┬───────────┘   └────────────┬───────────────┘   │
+└─────────────┼──────────────────────────────┼─────────────────┘
+              │                              │
+              ▼                              ▼
+    ┌──────────────────┐          ┌──────────────────────┐
+    │  Gemini AI API   │          │  RxNorm NLM API      │
+    │  (Medical OCR)   │          │  (Drug Database)     │
+    └──────────────────┘          └──────────────────────┘
+              │
+              ▼
+    ┌──────────────────┐
+    │  Markdown Files  │
+    │  (Local Storage) │
+    └──────────────────┘
 ```
 
 ## 📁 Project Structure
@@ -48,27 +67,30 @@ MedEase is a full-stack web application that uses Google Gemini AI to convert El
 ```
 medEase/
 ├── backend/
-│   ├── main.py              # FastAPI server with Gemini integration
-│   ├── requirements.txt     # Python dependencies
-│   ├── .env.example         # Environment variables template
-│   └── .env                 # Your API keys (create this)
+│   ├── main.py                      # FastAPI server with API endpoints
+│   ├── medication_analyzer.py       # Drug interaction analysis engine
+│   ├── drug_data.py                 # Drug interaction database
+│   ├── test_medication_analyzer.py  # Unit tests for analyzer
+│   ├── requirements.txt             # Python dependencies
+│   ├── .env.example                 # Environment variables template
+│   └── .env                         # Your API keys (create this)
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx         # Main React component
-│   │   ├── App.css         # Application styles
-│   │   ├── main.tsx        # React entry point
-│   │   └── index.css       # Global styles
-│   ├── index.html          # HTML template
-│   ├── package.json        # Node.js dependencies
-│   ├── vite.config.ts      # Vite configuration
-│   └── tsconfig.json       # TypeScript configuration
+│   │   ├── App.tsx                 # Main React component
+│   │   ├── App.css                 # Application styles
+│   │   ├── main.tsx                # React entry point
+│   │   └── index.css               # Global styles
+│   ├── index.html                  # HTML template
+│   ├── package.json                # Node.js dependencies
+│   ├── vite.config.ts              # Vite configuration
+│   └── tsconfig.json               # TypeScript configuration
 ├── outputs/
-│   └── summaries/          # Generated markdown summaries
-├── README.md               # This file
-├── QUICK_START.md          # Quick start guide
-├── start.sh                # Mac/Linux startup script
-├── start.bat               # Windows startup script
-└── .gitignore             # Git ignore rules
+│   └── summaries/                  # Generated markdown summaries
+├── README.md                       # This file
+├── QUICK_START.md                  # Quick start guide
+├── start.sh                        # Mac/Linux startup script
+├── start.bat                       # Windows startup script
+└── .gitignore                     # Git ignore rules
 ```
 
 ## 🚀 Prerequisites
@@ -193,6 +215,8 @@ Open your browser and go to: **http://localhost:3000**
 
 ## 📖 Usage Guide
 
+### EHR Summarizer
+
 1. **Open the application** in your browser (http://localhost:3000)
 
 2. **Upload a document**:
@@ -212,6 +236,37 @@ Open your browser and go to: **http://localhost:3000**
    - Click "Download" to save as a markdown file
    - Click "Print" to print the summary
    - Click "New Upload" to process another document
+
+### Drug Interaction Checker (API Usage)
+
+The medication analysis feature is available via the REST API. Use it to check medications for safety issues:
+
+**Example using curl:**
+```bash
+curl -X POST http://localhost:8000/api/analyze-medications \
+  -H "Content-Type: application/json" \
+  -d '{
+    "medications": [
+      {
+        "name": "Lisinopril",
+        "dosage": "10mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "Ibuprofen",
+        "dosage": "400mg",
+        "frequency": "as needed"
+      }
+    ]
+  }'
+```
+
+**What it checks:**
+- **Drug Interactions**: Identifies harmful combinations between medications
+- **Duplicate Therapy**: Detects multiple drugs serving the same purpose
+- **Side Effects**: Aggregates potential side effects across all medications
+- **Dosage Validation**: Checks if dosages are within safe ranges
+- **Risk Assessment**: Provides an overall risk level (low/moderate/high)
 
 ## 🔧 API Documentation
 
@@ -235,7 +290,7 @@ Upload and summarize a medical document.
 
 **Request:**
 - Content-Type: `multipart/form-data`
-- Body: `file` (PDF, PNG, or JPG file)
+- Body: `file` (PDF, PNG, or JPG file, max 25MB)
 
 **Response:**
 ```json
@@ -246,6 +301,71 @@ Upload and summarize a medical document.
   "date_processed": "2024-01-15T14:30:22.123456"
 }
 ```
+
+#### `POST /api/analyze-medications`
+Analyze medications for interactions, duplicates, side effects, and dosage issues.
+
+**Request:**
+- Content-Type: `application/json`
+- Body:
+```json
+{
+  "medications": [
+    {
+      "name": "Lisinopril",
+      "dosage": "10mg",
+      "frequency": "once daily",
+      "purpose": "blood pressure"
+    },
+    {
+      "name": "Metformin",
+      "dosage": "500mg",
+      "frequency": "twice daily",
+      "purpose": "diabetes"
+    }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "medications_analyzed": 2,
+  "timestamp": "2024-01-15T14:30:22.123456",
+  "interactions": [
+    {
+      "drug1": "Lisinopril",
+      "drug2": "Metformin",
+      "severity": "moderate",
+      "description": "May increase risk of hypoglycemia",
+      "recommendation": "Monitor blood sugar levels closely"
+    }
+  ],
+  "duplicate_therapies": [],
+  "side_effects": {
+    "common": {
+      "dizziness": {
+        "count": 2,
+        "drugs": ["Lisinopril", "Metformin"]
+      }
+    },
+    "serious": {},
+    "cumulative_warnings": [
+      {
+        "effect": "dizziness",
+        "severity": "moderate",
+        "description": "Multiple medications (2) may cause dizziness",
+        "drugs": ["Lisinopril", "Metformin"]
+      }
+    ]
+  },
+  "dosage_warnings": [],
+  "overall_risk_level": "low"
+}
+```
+
+**Limits:**
+- Maximum 50 medications per request
 
 #### `GET /api/summaries`
 List all saved summaries.
@@ -322,13 +442,15 @@ List all saved summaries.
 
 ## 🌟 Features Explained
 
-### Upload States
+### EHR Summarizer Features
+
+#### Upload States
 
 1. **Upload State**: Drag-and-drop interface with file validation
 2. **Processing State**: Loading animation with progress steps
 3. **Results State**: Formatted summary with action buttons
 
-### Summary Sections
+#### Summary Sections
 
 Each summary includes:
 
@@ -339,7 +461,7 @@ Each summary includes:
 - 📅 **What to Do Next**: Follow-up instructions
 - 🚨 **When to Seek Help**: Emergency warning signs
 
-### Markdown Export
+#### Markdown Export
 
 Summaries are saved as markdown files with:
 - Patient name and timestamp
@@ -347,13 +469,50 @@ Summaries are saved as markdown files with:
 - Full formatted summary
 - MedEase branding
 
+### Drug Interaction Checker Features
+
+#### 4 Core Analysis Functions
+
+1. **Drug-Drug Interaction Detection**
+   - Checks every pair of medications for known interactions
+   - Uses RxNorm API for accurate drug identification
+   - Severity levels: Severe, Moderate, Mild
+   - Provides specific recommendations for each interaction
+
+2. **Duplicate Therapy Detection**
+   - Groups medications by therapeutic class
+   - Identifies redundant medications with same purpose
+   - Distinguishes between duplicates and complementary combinations
+   - Prevents unnecessary medication overlap
+
+3. **Side Effect Aggregation**
+   - Combines side effects from all medications
+   - Highlights cumulative effects (when multiple drugs cause same side effect)
+   - Separates common vs. serious side effects
+   - Provides severity assessment for cumulative warnings
+
+4. **Dosage Validation**
+   - Parses dosage strings (supports mg, g, mcg, ml, units)
+   - Compares against standard therapeutic ranges
+   - Flags: below minimum, above maximum, or higher than typical doses
+   - Severity-based warnings (mild/moderate/severe)
+
+#### Risk Level Assessment
+
+The system calculates an overall risk level:
+- **Low**: No severe interactions, minimal warnings
+- **Moderate**: 1-2 moderate issues or multiple mild warnings
+- **High**: Any severe interactions or critical dosage issues
+
 ## 🛠️ Development
 
 ### Tech Stack
 
 **Backend:**
 - FastAPI (Python web framework)
-- Google Generative AI (Gemini API)
+- Google Generative AI (Gemini API for EHR analysis)
+- RxNorm NLM API (drug database integration)
+- Requests (HTTP client for external APIs)
 - Pydantic (data validation)
 - Python-dotenv (environment management)
 
@@ -365,12 +524,15 @@ Summaries are saved as markdown files with:
 
 ### Code Structure
 
-**Backend (`backend/main.py`):**
-- FastAPI app configuration
-- Gemini API integration
-- File upload handling
-- Prompt engineering
-- Markdown file generation
+**Backend:**
+- `main.py` - FastAPI app with all API endpoints
+- `medication_analyzer.py` - Drug interaction analysis engine
+  - Drug-drug interaction checking
+  - Duplicate therapy detection
+  - Side effect aggregation
+  - Dosage validation
+  - RxNorm API integration
+- `drug_data.py` - Drug interaction database and reference data
 
 **Frontend (`frontend/src/App.tsx`):**
 - State management (upload, processing, results)
@@ -413,14 +575,19 @@ For issues, questions, or suggestions:
 ## 🎉 Credits
 
 Built with:
-- Google Gemini AI
-- FastAPI
-- React
-- TypeScript
-- Vite
+- **Google Gemini AI** - Medical document analysis
+- **RxNorm (NLM)** - Drug database and medication information
+- **FastAPI** - High-performance backend framework
+- **React** - Modern UI framework
+- **TypeScript** - Type-safe development
+- **Vite** - Lightning-fast build tool
+
+### Data Sources
+- RxNorm API by the U.S. National Library of Medicine (NLM)
+- Drug interaction data compiled from medical literature
 
 ---
 
 **Made with ❤️ for patients who want to understand their health**
 
-*Version 1.0.0*
+*Version 2.0.0 - Now with Drug Interaction Checking*
