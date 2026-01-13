@@ -2,7 +2,7 @@ import os
 import base64
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import google.generativeai as genai
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -10,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
+
+# Import medication analyzer
+from medication_analyzer import analyzer
 
 # Load environment variables
 load_dotenv()
@@ -50,6 +53,27 @@ class SummaryResponse(BaseModel):
     markdown_path: str
     patient_name: Optional[str]
     date_processed: str
+
+
+class Medication(BaseModel):
+    name: str
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    purpose: Optional[str] = None
+
+
+class MedicationAnalysisRequest(BaseModel):
+    medications: List[Medication]
+
+
+class MedicationAnalysisResponse(BaseModel):
+    medications_analyzed: int
+    timestamp: str
+    interactions: List[Dict[str, Any]]
+    duplicate_therapies: List[Dict[str, Any]]
+    side_effects: Dict[str, Any]
+    dosage_warnings: List[Dict[str, Any]]
+    overall_risk_level: str
 
 
 def get_mime_type(filename: str) -> str:
@@ -273,6 +297,56 @@ async def summarize_ehr(file: UploadFile = File(...)):
             "patient_name": patient_name,
             "date_processed": datetime.now().isoformat()
         })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}"
+        )
+
+
+@app.post("/api/analyze-medications")
+async def analyze_medications(request: MedicationAnalysisRequest):
+    """
+    Analyze medications for interactions, duplicates, side effects, and dosage issues.
+
+    Accepts: List of medications with name, dosage, frequency, and purpose
+    Returns: Comprehensive analysis including:
+        - Drug-drug interactions
+        - Duplicate therapy detection
+        - Aggregated side effects
+        - Dosage validation warnings
+    """
+    try:
+        # Validate input
+        if not request.medications:
+            raise HTTPException(
+                status_code=400,
+                detail="No medications provided for analysis"
+            )
+
+        if len(request.medications) > 50:
+            raise HTTPException(
+                status_code=400,
+                detail="Too many medications. Maximum 50 medications can be analyzed at once."
+            )
+
+        # Convert Pydantic models to dictionaries
+        medications = [med.model_dump() for med in request.medications]
+
+        # Perform analysis
+        try:
+            results = analyzer.analyze_medications(medications)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error during medication analysis: {str(e)}"
+            )
+
+        # Return results
+        return JSONResponse(content=results)
 
     except HTTPException:
         raise
