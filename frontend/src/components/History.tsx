@@ -15,7 +15,7 @@ interface HistoryProps {
   onSelectSummary?: (summary: Summary) => void
 }
 
-function History({ onSelectSummary }: HistoryProps) {
+function History({ onSelectSummary: _onSelectSummary }: HistoryProps) {
   const [summaries, setSummaries] = useState<Summary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

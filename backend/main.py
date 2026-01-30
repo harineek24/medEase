@@ -1418,7 +1418,7 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
                         new_value = data.get("value")
                         label = data.get("label", field_name)
                         db.save_consultation_field(session_id, field_name, label, new_value, confirmed=True)
-                        session.update_field(field_name, new_value)
+                        session.save_field(field_name, new_value)
                         await websocket.send_json({
                             "type": "field_updated",
                             "field_name": field_name,
