@@ -1,12 +1,12 @@
 """
 Voice Service for Live Doctor Consultation
-Uses Gemini 2.5 Flash with native audio for real-time voice conversations
+Uses Gemini 2.5 Flash Native Audio with bidirectional streaming
+Based on voicegen reference implementation
 """
 
 import os
 import json
 import asyncio
-import base64
 from typing import Optional, Dict, Any, Callable, List
 from datetime import datetime
 from dotenv import load_dotenv
@@ -16,54 +16,47 @@ load_dotenv()
 # Try to import google genai for live audio
 try:
     from google import genai
-    from google.genai import types
     GENAI_AVAILABLE = True
 except ImportError:
     GENAI_AVAILABLE = False
     genai = None
-    types = None
     print("Warning: google-genai package not installed. Voice features will be limited.")
 
 
-# Consultation fields we want to extract
-CONSULTATION_FIELDS = [
-    {"name": "patient_name", "label": "Patient Name", "question": "What is your name?"},
-    {"name": "date_of_birth", "label": "Date of Birth", "question": "What is your date of birth?"},
-    {"name": "chief_complaint", "label": "Chief Complaint", "question": "What brings you in today? What's your main concern?"},
-    {"name": "symptom_duration", "label": "Duration", "question": "How long have you been experiencing this?"},
-    {"name": "symptom_severity", "label": "Severity", "question": "On a scale of 1 to 10, how severe is it?"},
-    {"name": "symptom_location", "label": "Location", "question": "Where exactly do you feel the discomfort?"},
-    {"name": "symptom_quality", "label": "Quality", "question": "Can you describe what it feels like?"},
-    {"name": "aggravating_factors", "label": "What Makes It Worse", "question": "What makes it worse?"},
-    {"name": "relieving_factors", "label": "What Helps", "question": "What makes it better?"},
-    {"name": "associated_symptoms", "label": "Other Symptoms", "question": "Are you experiencing any other symptoms?"},
-    {"name": "medications", "label": "Current Medications", "question": "What medications are you currently taking?"},
-    {"name": "allergies", "label": "Allergies", "question": "Do you have any allergies?"},
-    {"name": "medical_history", "label": "Medical History", "question": "Do you have any significant medical conditions?"},
+# Audio configuration matching Gemini Live API requirements
+CHANNELS = 1
+SEND_SAMPLE_RATE = 16000
+RECEIVE_SAMPLE_RATE = 24000
+CHUNK_SIZE = 1024
+
+# Default consultation fields - can be overridden by admin config
+DEFAULT_CONSULTATION_FIELDS = [
+    {"name": "patient_name", "type": "text", "label": "Patient Name", "prompt": "What is your name?", "required": True},
+    {"name": "date_of_birth", "type": "date", "label": "Date of Birth", "prompt": "What is your date of birth?", "required": True},
+    {"name": "chief_complaint", "type": "text", "label": "Chief Complaint", "prompt": "What brings you in today? What's your main concern?", "required": True},
+    {"name": "symptom_duration", "type": "text", "label": "Duration", "prompt": "How long have you been experiencing this?", "required": True},
+    {"name": "symptom_severity", "type": "number", "label": "Severity", "prompt": "On a scale of 1 to 10, how severe is it?", "required": True},
+    {"name": "symptom_location", "type": "text", "label": "Location", "prompt": "Where exactly do you feel the discomfort?", "required": False},
+    {"name": "symptom_quality", "type": "text", "label": "Quality", "prompt": "Can you describe what it feels like?", "required": False},
+    {"name": "aggravating_factors", "type": "text", "label": "What Makes It Worse", "prompt": "What makes it worse?", "required": False},
+    {"name": "relieving_factors", "type": "text", "label": "What Helps", "prompt": "What makes it better?", "required": False},
+    {"name": "associated_symptoms", "type": "text", "label": "Other Symptoms", "prompt": "Are you experiencing any other symptoms?", "required": False},
+    {"name": "medications", "type": "text", "label": "Current Medications", "prompt": "What medications are you currently taking?", "required": True},
+    {"name": "allergies", "type": "text", "label": "Allergies", "prompt": "Do you have any allergies?", "required": True},
+    {"name": "medical_history", "type": "text", "label": "Medical History", "prompt": "Do you have any significant medical conditions?", "required": False},
 ]
 
-DOCTOR_SYSTEM_PROMPT = """You are Dr. MedAssist, a warm and professional AI physician assistant conducting a virtual medical consultation.
+# Default AI prompt
+DEFAULT_AI_PROMPT = "Hello! I'm Dr. MedAssist, your AI medical assistant. I'm here to help gather some information about your health concern today."
+
+# Default system instruction template
+DEFAULT_SYSTEM_INSTRUCTION = """You are Dr. MedAssist, a warm and professional AI physician assistant conducting a virtual medical consultation.
 
 Your role:
 - Conduct a structured medical interview, asking ONE question at a time
 - Be empathetic, patient, and reassuring
 - Speak naturally as if in a real doctor's office
 - After each answer, briefly acknowledge what the patient said before moving to the next question
-
-The fields you need to collect (in order):
-1. Patient's name
-2. Date of birth
-3. Chief complaint (main reason for visit)
-4. Duration of symptoms
-5. Severity (1-10 scale)
-6. Location of discomfort
-7. Quality/character of symptoms
-8. Aggravating factors
-9. Relieving factors
-10. Associated symptoms
-11. Current medications
-12. Allergies
-13. Relevant medical history
 
 IMPORTANT RULES:
 - Ask only ONE question at a time
@@ -73,16 +66,78 @@ IMPORTANT RULES:
 - After collecting all information, provide a brief summary and general recommendations
 - Always remind patients this is not a substitute for in-person medical care
 
-When you extract information, call the save_field function with the field name and value.
+COMPLETION RULES:
+- When you have collected all required information, call submit_consultation_summary with a JSON summary
+- Then say "Thank you! Your consultation summary has been saved." and call complete_consultation
+"""
 
-Start by warmly greeting the patient and asking for their name."""
+# Available voice options for Gemini
+AVAILABLE_VOICES = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
+
+
+class ConsultationConfig:
+    """Configuration for a consultation form - can be customized by admin"""
+
+    def __init__(
+        self,
+        config_id: str = "default",
+        name: str = "Medical Consultation",
+        description: str = "Standard medical intake consultation",
+        fields: Optional[List[Dict]] = None,
+        ai_prompt: str = DEFAULT_AI_PROMPT,
+        system_instruction: Optional[str] = None,
+        voice_name: str = "Aoede",
+        success_message: str = "Thank you for completing the consultation!",
+        emergency_message: str = "This appears to be an emergency. Please call 911 immediately.",
+        settings: Optional[Dict] = None
+    ):
+        self.config_id = config_id
+        self.name = name
+        self.description = description
+        self.fields = fields or DEFAULT_CONSULTATION_FIELDS
+        self.ai_prompt = ai_prompt
+        self.system_instruction = system_instruction or DEFAULT_SYSTEM_INSTRUCTION
+        self.voice_name = voice_name if voice_name in AVAILABLE_VOICES else "Aoede"
+        self.success_message = success_message
+        self.emergency_message = emergency_message
+        self.settings = settings or {}
+
+    def to_dict(self) -> Dict:
+        return {
+            "config_id": self.config_id,
+            "name": self.name,
+            "description": self.description,
+            "fields": self.fields,
+            "ai_prompt": self.ai_prompt,
+            "system_instruction": self.system_instruction,
+            "voice_name": self.voice_name,
+            "success_message": self.success_message,
+            "emergency_message": self.emergency_message,
+            "settings": self.settings
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'ConsultationConfig':
+        return cls(
+            config_id=data.get("config_id", "default"),
+            name=data.get("name", "Medical Consultation"),
+            description=data.get("description", ""),
+            fields=data.get("fields"),
+            ai_prompt=data.get("ai_prompt", DEFAULT_AI_PROMPT),
+            system_instruction=data.get("system_instruction"),
+            voice_name=data.get("voice_name", "Aoede"),
+            success_message=data.get("success_message", "Thank you!"),
+            emergency_message=data.get("emergency_message", "Please call 911!"),
+            settings=data.get("settings", {})
+        )
 
 
 class ConsultationSession:
     """Manages a single consultation session's state"""
 
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, config: Optional[ConsultationConfig] = None):
         self.session_id = session_id
+        self.config = config or ConsultationConfig()
         self.fields: Dict[str, Any] = {}
         self.current_field_index = 0
         self.conversation_history: List[Dict] = []
@@ -90,12 +145,12 @@ class ConsultationSession:
         self.is_emergency = False
         self.created_at = datetime.now()
         self.audio_queue = asyncio.Queue()
-        self.response_queue = asyncio.Queue()
+        self.collected_data: Dict[str, Any] = {}
 
     def get_collected_fields(self) -> List[Dict]:
         """Return list of collected fields with their values"""
         result = []
-        for field in CONSULTATION_FIELDS:
+        for field in self.config.fields:
             if field["name"] in self.fields:
                 result.append({
                     "name": field["name"],
@@ -107,7 +162,7 @@ class ConsultationSession:
 
     def get_next_field(self) -> Optional[Dict]:
         """Get the next field to collect"""
-        for field in CONSULTATION_FIELDS:
+        for field in self.config.fields:
             if field["name"] not in self.fields:
                 return field
         return None
@@ -115,35 +170,36 @@ class ConsultationSession:
     def save_field(self, field_name: str, value: str) -> bool:
         """Save a field value"""
         self.fields[field_name] = value
+        self.collected_data[field_name] = value
         return True
-
-    def update_field(self, field_name: str, value: str) -> bool:
-        """Update an existing field value"""
-        if field_name in self.fields or any(f["name"] == field_name for f in CONSULTATION_FIELDS):
-            self.fields[field_name] = value
-            return True
-        return False
 
     def is_complete(self) -> bool:
         """Check if all required fields are collected"""
-        required = ["patient_name", "chief_complaint"]  # Minimum required
-        return all(f in self.fields for f in required)
+        required_fields = [f["name"] for f in self.config.fields if f.get("required", False)]
+        return all(f in self.fields for f in required_fields)
+
+    def get_completion_percentage(self) -> int:
+        """Calculate completion percentage"""
+        total = len(self.config.fields)
+        if total == 0:
+            return 0
+        collected = len([f for f in self.config.fields if f["name"] in self.fields])
+        return int((collected / total) * 100)
 
 
 class VoiceConsultationService:
-    """Service for managing voice-based medical consultations using Gemini Live API"""
+    """
+    Service for real-time voice consultation using Gemini Live API
+    Based on voicegen reference implementation
+    """
 
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.sessions: Dict[str, ConsultationSession] = {}
+        self.configs: Dict[str, ConsultationConfig] = {"default": ConsultationConfig()}
 
-        # Audio settings matching voicegen
-        self.send_sample_rate = 16000  # Browser to Gemini
-        self.receive_sample_rate = 24000  # Gemini to browser
-        self.chunk_size = 1024
-
-        # Model for live audio
-        self.model_id = "gemini-2.0-flash-live-001"
+        # Model for live audio - matching voicegen reference
+        self.model_id = "gemini-2.5-flash-native-audio-preview-09-2025"
 
         if GENAI_AVAILABLE and self.api_key:
             self.client = genai.Client(
@@ -153,9 +209,48 @@ class VoiceConsultationService:
         else:
             self.client = None
 
-    def create_session(self, session_id: str) -> ConsultationSession:
-        """Create a new consultation session"""
-        session = ConsultationSession(session_id)
+    # =========================================================================
+    # Configuration Management (Admin Features)
+    # =========================================================================
+
+    def create_config(self, config: ConsultationConfig) -> ConsultationConfig:
+        """Create a new consultation configuration"""
+        self.configs[config.config_id] = config
+        return config
+
+    def get_config(self, config_id: str = "default") -> Optional[ConsultationConfig]:
+        """Get a consultation configuration by ID"""
+        return self.configs.get(config_id)
+
+    def update_config(self, config_id: str, updates: Dict) -> Optional[ConsultationConfig]:
+        """Update an existing configuration"""
+        config = self.configs.get(config_id)
+        if config:
+            for key, value in updates.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            return config
+        return None
+
+    def delete_config(self, config_id: str) -> bool:
+        """Delete a configuration (cannot delete default)"""
+        if config_id != "default" and config_id in self.configs:
+            del self.configs[config_id]
+            return True
+        return False
+
+    def list_configs(self) -> List[Dict]:
+        """List all configurations"""
+        return [c.to_dict() for c in self.configs.values()]
+
+    # =========================================================================
+    # Session Management
+    # =========================================================================
+
+    def create_session(self, session_id: str, config_id: str = "default") -> ConsultationSession:
+        """Create a new consultation session with optional config"""
+        config = self.configs.get(config_id, self.configs["default"])
+        session = ConsultationSession(session_id, config)
         self.sessions[session_id] = session
         return session
 
@@ -163,70 +258,168 @@ class VoiceConsultationService:
         """Get an existing session"""
         return self.sessions.get(session_id)
 
-    def get_tools_config(self):
-        """Define the function tools for field extraction using proper Gemini types"""
-        if not GENAI_AVAILABLE or types is None:
-            return []
+    def end_session(self, session_id: str) -> Optional[Dict]:
+        """End a consultation session and return collected data"""
+        session = self.sessions.get(session_id)
+        if session:
+            session.is_active = False
+            return {
+                "session_id": session_id,
+                "fields": session.fields,
+                "collected_data": session.collected_data,
+                "is_emergency": session.is_emergency,
+                "conversation_history": session.conversation_history,
+                "completion_percentage": session.get_completion_percentage()
+            }
+        return None
 
-        # Build the enum values for field names
-        field_names = [f["name"] for f in CONSULTATION_FIELDS]
+    # =========================================================================
+    # Gemini Live API Configuration
+    # =========================================================================
 
-        save_field_declaration = types.FunctionDeclaration(
-            name="save_field",
-            description="Save a piece of information collected from the patient",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "field_name": types.Schema(
-                        type=types.Type.STRING,
-                        enum=field_names,
-                        description="The name of the field being saved"
-                    ),
-                    "value": types.Schema(
-                        type=types.Type.STRING,
-                        description="The value to save"
-                    )
-                },
-                required=["field_name", "value"]
+    def build_system_instruction(self, session: ConsultationSession) -> str:
+        """Build system instruction for the consultation"""
+        config = session.config
+        fields = config.fields
+
+        # Build field list for system instruction
+        field_list = []
+        for i, field in enumerate(fields, 1):
+            req = "REQUIRED" if field.get("required") else "optional"
+            field_list.append(
+                f"{i}. {field['name']} ({field['type']}, {req}): {field['prompt']}"
             )
-        )
 
-        flag_emergency_declaration = types.FunctionDeclaration(
-            name="flag_emergency",
-            description="Flag this as an emergency situation requiring immediate medical attention",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "reason": types.Schema(
-                        type=types.Type.STRING,
-                        description="The emergency symptoms detected"
-                    )
-                },
-                required=["reason"]
-            )
-        )
-
-        return [types.Tool(function_declarations=[save_field_declaration, flag_emergency_declaration])]
-
-    def get_session_config(self, session: ConsultationSession):
-        """Get the configuration for a Gemini Live session"""
-        if not GENAI_AVAILABLE or types is None:
-            return None
+        # Get first question
+        first_field = fields[0] if fields else None
+        first_prompt = first_field['prompt'] if first_field else "Hello!"
 
         # Build context from already collected fields
         context = ""
         if session.fields:
             context = "\n\nInformation already collected:\n"
             for name, value in session.fields.items():
-                label = next((f["label"] for f in CONSULTATION_FIELDS if f["name"] == name), name)
+                label = next((f["label"] for f in fields if f["name"] == name), name)
                 context += f"- {label}: {value}\n"
             context += "\nContinue from where we left off, asking about the next missing field."
 
-        return types.LiveConnectConfig(
-            system_instruction=DOCTOR_SYSTEM_PROMPT + context,
-            response_modalities=["AUDIO", "TEXT"],
-            tools=self.get_tools_config(),
-        )
+        return f"""{config.system_instruction}
+
+AVAILABLE QUESTIONS (use them as guidance, but keep it conversational):
+{chr(10).join(field_list)}
+
+START NOW by saying ONLY this opening line:
+"{config.ai_prompt} {first_prompt}"
+
+STYLE RULES:
+- Keep replies concise
+- Be friendly and professional
+- Use a warm, reassuring tone
+{context}
+
+COMPLETION RULES:
+- When you have enough information, call submit_consultation_summary with:
+  {{"summary_text": "<1-2 sentence summary>", "collected_fields": "<JSON of all collected fields>"}}
+- After calling submit_consultation_summary, say "{config.success_message}" and call complete_consultation
+"""
+
+    def get_tools_config(self, session: ConsultationSession) -> List[Dict]:
+        """
+        Define function tools for field extraction
+        Uses raw dict format matching voicegen reference
+        """
+        field_names = [f["name"] for f in session.config.fields]
+
+        return [
+            {
+                "function_declarations": [
+                    {
+                        "name": "save_field",
+                        "description": "Save a piece of information collected from the patient",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "field_name": {
+                                    "type": "string",
+                                    "enum": field_names,
+                                    "description": "The name of the field being saved"
+                                },
+                                "value": {
+                                    "type": "string",
+                                    "description": "The value to save"
+                                }
+                            },
+                            "required": ["field_name", "value"]
+                        }
+                    },
+                    {
+                        "name": "flag_emergency",
+                        "description": "Flag this as an emergency requiring immediate medical attention",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "reason": {
+                                    "type": "string",
+                                    "description": "The emergency symptoms detected"
+                                }
+                            },
+                            "required": ["reason"]
+                        }
+                    },
+                    {
+                        "name": "submit_consultation_summary",
+                        "description": "Submit a summary of the consultation with all collected information",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "summary_text": {
+                                    "type": "string",
+                                    "description": "A brief 1-2 sentence summary of the consultation"
+                                },
+                                "collected_fields": {
+                                    "type": "string",
+                                    "description": "JSON string of all collected field values"
+                                }
+                            },
+                            "required": ["summary_text", "collected_fields"]
+                        }
+                    },
+                    {
+                        "name": "complete_consultation",
+                        "description": "Mark the consultation as completed",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    }
+                ]
+            }
+        ]
+
+    def get_session_config(self, session: ConsultationSession) -> Dict:
+        """
+        Get configuration for Gemini Live session
+        Uses raw dict format matching voicegen reference
+        """
+        system_instruction = self.build_system_instruction(session)
+
+        return {
+            "system_instruction": system_instruction,
+            "response_modalities": ["AUDIO"],
+            "proactivity": {"proactive_audio": True},
+            "tools": self.get_tools_config(session),
+            "speech_config": {
+                "voice_config": {
+                    "prebuilt_voice_config": {
+                        "voice_name": session.config.voice_name
+                    }
+                }
+            }
+        }
+
+    # =========================================================================
+    # Audio Processing
+    # =========================================================================
 
     async def process_audio_stream(
         self,
@@ -234,20 +427,15 @@ class VoiceConsultationService:
         on_audio: Callable[[bytes], Any],
         on_text: Callable[[str], Any],
         on_field_extracted: Callable[[str, str, str], Any],
-        on_emergency: Callable[[str], Any]
+        on_emergency: Callable[[str], Any],
+        on_progress: Optional[Callable[[int, int], Any]] = None,
+        on_complete: Optional[Callable[[Dict], Any]] = None
     ):
         """
         Process the audio stream for a consultation session
-
-        Args:
-            session: The consultation session
-            on_audio: Callback for audio output (bytes)
-            on_text: Callback for text transcripts
-            on_field_extracted: Callback when a field is extracted (field_name, label, value)
-            on_emergency: Callback for emergency detection
+        Follows voicegen reference implementation pattern
         """
         if not self.client:
-            # Fallback for when Gemini Live isn't available
             await on_text("Voice consultation requires the google-genai package with Live API support.")
             return
 
@@ -259,16 +447,12 @@ class VoiceConsultationService:
                 config=config
             ) as live_session:
 
-                # Start receiving responses in background
-                receive_task = asyncio.create_task(
-                    self._receive_responses(
-                        live_session, session, on_audio, on_text,
-                        on_field_extracted, on_emergency
-                    )
-                )
+                # Initialize queues
+                audio_in_queue = asyncio.Queue()  # Gemini -> Browser
 
-                # Process incoming audio from the user
-                try:
+                # Create background tasks
+                async def send_audio_to_gemini():
+                    """Send audio from browser to Gemini"""
                     while session.is_active:
                         try:
                             audio_data = await asyncio.wait_for(
@@ -279,7 +463,7 @@ class VoiceConsultationService:
                                 await live_session.send_realtime_input(
                                     audio={
                                         "data": audio_data,
-                                        "mime_type": "audio/pcm;rate=16000"
+                                        "mime_type": "audio/pcm"
                                     }
                                 )
                         except asyncio.TimeoutError:
@@ -287,89 +471,173 @@ class VoiceConsultationService:
                         except Exception as e:
                             print(f"Error sending audio: {e}")
                             break
+
+                async def receive_from_gemini():
+                    """Receive responses from Gemini"""
+                    while session.is_active:
+                        try:
+                            turn = live_session.receive()
+                            async for response in turn:
+                                if not session.is_active:
+                                    break
+
+                                # Handle audio data
+                                if data := getattr(response, 'data', None):
+                                    await on_audio(data)
+
+                                # Handle text (for transcripts)
+                                if text := getattr(response, 'text', None):
+                                    await on_text(text)
+                                    session.conversation_history.append({
+                                        "role": "assistant",
+                                        "content": text,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+
+                                # Handle tool calls
+                                await self._process_tool_calls(
+                                    response, session,
+                                    on_field_extracted, on_emergency,
+                                    on_progress, on_complete
+                                )
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            print(f"Error receiving from Gemini: {e}")
+                            break
+
+                # Run tasks concurrently
+                send_task = asyncio.create_task(send_audio_to_gemini())
+                receive_task = asyncio.create_task(receive_from_gemini())
+
+                try:
+                    await asyncio.gather(send_task, receive_task)
+                except asyncio.CancelledError:
+                    pass
                 finally:
+                    send_task.cancel()
                     receive_task.cancel()
-                    try:
-                        await receive_task
-                    except asyncio.CancelledError:
-                        pass
 
         except Exception as e:
             print(f"Error in audio stream processing: {e}")
             await on_text(f"Connection error: {str(e)}")
 
-    async def _receive_responses(
+    async def _process_tool_calls(
         self,
-        live_session,
-        session: ConsultationSession,
-        on_audio: Callable,
-        on_text: Callable,
-        on_field_extracted: Callable,
-        on_emergency: Callable
-    ):
-        """Receive and process responses from Gemini"""
-        try:
-            async for response in live_session.receive():
-                if not session.is_active:
-                    break
-
-                # Handle audio output
-                if hasattr(response, 'data') and response.data:
-                    await on_audio(response.data)
-
-                # Handle text output
-                if hasattr(response, 'text') and response.text:
-                    await on_text(response.text)
-                    session.conversation_history.append({
-                        "role": "assistant",
-                        "content": response.text,
-                        "timestamp": datetime.now().isoformat()
-                    })
-
-                # Handle tool calls (field extraction)
-                if hasattr(response, 'tool_calls') and response.tool_calls:
-                    for tool_call in response.tool_calls:
-                        await self._handle_tool_call(
-                            tool_call, session,
-                            on_field_extracted, on_emergency
-                        )
-
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f"Error receiving responses: {e}")
-
-    async def _handle_tool_call(
-        self,
-        tool_call,
+        response,
         session: ConsultationSession,
         on_field_extracted: Callable,
-        on_emergency: Callable
+        on_emergency: Callable,
+        on_progress: Optional[Callable],
+        on_complete: Optional[Callable]
     ):
-        """Handle a tool call from Gemini"""
-        try:
-            name = tool_call.name if hasattr(tool_call, 'name') else tool_call.get('name')
-            args = tool_call.args if hasattr(tool_call, 'args') else tool_call.get('args', {})
+        """Process tool calls from Gemini response"""
+        calls = self._extract_tool_calls(response)
 
-            if name == "save_field":
-                field_name = args.get("field_name")
-                value = args.get("value")
+        for call in calls:
+            name = call.get('name', '').strip()
+            args = call.get('args', {})
+
+            if name == 'save_field':
+                field_name = args.get('field_name') or args.get('fieldName')
+                value = args.get('value')
 
                 if field_name and value:
                     session.save_field(field_name, value)
                     label = next(
-                        (f["label"] for f in CONSULTATION_FIELDS if f["name"] == field_name),
+                        (f["label"] for f in session.config.fields if f["name"] == field_name),
                         field_name
                     )
                     await on_field_extracted(field_name, label, value)
 
-            elif name == "flag_emergency":
-                reason = args.get("reason", "Emergency symptoms detected")
+                    if on_progress:
+                        await on_progress(
+                            len(session.fields),
+                            len(session.config.fields)
+                        )
+
+            elif name == 'flag_emergency':
+                reason = args.get('reason', 'Emergency symptoms detected')
                 session.is_emergency = True
                 await on_emergency(reason)
 
+            elif name == 'submit_consultation_summary':
+                summary_text = args.get('summary_text', '')
+                collected_fields_json = args.get('collected_fields', '{}')
+
+                try:
+                    parsed_fields = json.loads(collected_fields_json)
+                    if isinstance(parsed_fields, dict):
+                        session.collected_data.update(parsed_fields)
+                except json.JSONDecodeError:
+                    pass
+
+                session.conversation_history.append({
+                    "role": "system",
+                    "content": f"Summary submitted: {summary_text}",
+                    "timestamp": datetime.now().isoformat()
+                })
+
+            elif name == 'complete_consultation':
+                if on_complete:
+                    await on_complete({
+                        "session_id": session.session_id,
+                        "fields": session.fields,
+                        "collected_data": session.collected_data,
+                        "is_emergency": session.is_emergency,
+                        "completion_percentage": session.get_completion_percentage()
+                    })
+
+    def _extract_tool_calls(self, response) -> List[Dict]:
+        """
+        Extract tool calls from various SDK response shapes
+        Matching voicegen reference implementation
+        """
+        calls = []
+
+        try:
+            # Direct tool_call attribute
+            tc = getattr(response, 'tool_call', None)
+            if tc:
+                fc_list = getattr(tc, 'function_calls', None) or getattr(tc, 'tool_calls', None)
+                if fc_list and isinstance(fc_list, (list, tuple)):
+                    for fc in fc_list:
+                        name = getattr(fc, 'name', None)
+                        args = getattr(fc, 'args', None) or {}
+                        if name:
+                            calls.append({'name': name, 'args': args if isinstance(args, dict) else {}})
+                else:
+                    name = getattr(tc, 'name', None)
+                    args = getattr(tc, 'args', None) or {}
+                    if name:
+                        calls.append({'name': name, 'args': args if isinstance(args, dict) else {}})
+
+            # Plural attributes on response
+            for attr in ('function_calls', 'tool_calls'):
+                fc_list = getattr(response, attr, None)
+                if fc_list and isinstance(fc_list, (list, tuple)):
+                    for fc in fc_list:
+                        name = getattr(fc, 'name', None)
+                        args = getattr(fc, 'args', None) or {}
+                        if name:
+                            calls.append({'name': name, 'args': args if isinstance(args, dict) else {}})
+
+            # server_content.model_turn.parts nested calls
+            sc = getattr(response, 'server_content', None)
+            if sc and hasattr(sc, 'model_turn') and getattr(sc.model_turn, 'parts', None):
+                for part in sc.model_turn.parts:
+                    for cand_attr in ('function_call', 'tool_call'):
+                        fc = getattr(part, cand_attr, None)
+                        if fc:
+                            name = getattr(fc, 'name', None)
+                            args = getattr(fc, 'args', None) or {}
+                            if name:
+                                calls.append({'name': name, 'args': args if isinstance(args, dict) else {}})
+
         except Exception as e:
-            print(f"Error handling tool call: {e}")
+            print(f"Error extracting tool calls: {e}")
+
+        return calls
 
     async def send_audio(self, session_id: str, audio_data: bytes):
         """Queue audio data to be sent to Gemini"""
@@ -377,18 +645,9 @@ class VoiceConsultationService:
         if session and session.is_active:
             await session.audio_queue.put(audio_data)
 
-    def end_session(self, session_id: str) -> Optional[Dict]:
-        """End a consultation session and return collected data"""
-        session = self.sessions.get(session_id)
-        if session:
-            session.is_active = False
-            return {
-                "session_id": session_id,
-                "fields": session.fields,
-                "is_emergency": session.is_emergency,
-                "conversation_history": session.conversation_history
-            }
-        return None
+    # =========================================================================
+    # Summary Generation
+    # =========================================================================
 
     def generate_summary(self, session_id: str) -> str:
         """Generate a formatted summary of the consultation"""
@@ -399,26 +658,26 @@ class VoiceConsultationService:
         summary = f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║                    CONSULTATION SUMMARY                       ║
-║                      Dr. MedAssist AI                         ║
+║                      {session.config.name:^30}                ║
 ╠══════════════════════════════════════════════════════════════╣
 
 Date: {session.created_at.strftime("%B %d, %Y at %I:%M %p")}
 Session ID: {session_id}
+Completion: {session.get_completion_percentage()}%
 
 ──────────────────────────────────────────────────────────────
                       PATIENT INFORMATION
 ──────────────────────────────────────────────────────────────
 """
 
-        for field in CONSULTATION_FIELDS:
+        for field in session.config.fields:
             if field["name"] in session.fields:
                 summary += f"\n{field['label']}:\n    {session.fields[field['name']]}\n"
 
         if session.is_emergency:
-            summary += """
+            summary += f"""
 ══════════════════════════════════════════════════════════════
-⚠️  EMERGENCY FLAG: This consultation detected symptoms
-    requiring immediate medical attention.
+⚠️  EMERGENCY FLAG: {session.config.emergency_message}
 ══════════════════════════════════════════════════════════════
 """
 
