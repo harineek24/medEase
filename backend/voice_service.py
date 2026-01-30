@@ -697,3 +697,6 @@ qualified healthcare provider for proper medical care.
 
 # Global service instance
 voice_service = VoiceConsultationService()
+
+# Backwards compatibility alias
+CONSULTATION_FIELDS = DEFAULT_CONSULTATION_FIELDS
