@@ -1,8 +1,10 @@
 import { useState, DragEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import './App.css'
+import VoiceConsult from './components/VoiceConsult'
 
 type AppState = 'upload' | 'processing' | 'results'
+type AppPage = 'home' | 'voice-consult'
 
 interface SummaryData {
   summary: string
@@ -12,6 +14,7 @@ interface SummaryData {
 }
 
 function App() {
+  const [currentPage, setCurrentPage] = useState<AppPage>('home')
   const [appState, setAppState] = useState<AppState>('upload')
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null)
   const [error, setError] = useState<string>('')
@@ -125,6 +128,41 @@ function App() {
     setFileName('')
   }
 
+  // Render Voice Consultation page
+  if (currentPage === 'voice-consult') {
+    return (
+      <div>
+        {/* Navigation */}
+        <nav style={{
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          padding: '1rem 2rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <h1 style={{ color: 'white', margin: 0, fontSize: '1.5rem', cursor: 'pointer' }} onClick={() => setCurrentPage('home')}>
+            🏥 MedEase
+          </h1>
+          <button
+            onClick={() => setCurrentPage('home')}
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              color: 'white',
+              padding: '0.5rem 1rem',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '0.9rem'
+            }}
+          >
+            ← Back to Home
+          </button>
+        </nav>
+        <VoiceConsult />
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <div className="container">
@@ -133,6 +171,43 @@ function App() {
           <h1>🏥 MedEase</h1>
           <p className="subtitle">Transform complex medical records into clear, understandable summaries</p>
         </header>
+
+        {/* Navigation to Voice Consult */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          marginBottom: '2rem',
+          gap: '1rem'
+        }}>
+          <button
+            onClick={() => setCurrentPage('voice-consult')}
+            style={{
+              background: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
+              border: 'none',
+              color: 'white',
+              padding: '1rem 2rem',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              fontSize: '1rem',
+              fontWeight: '600',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              boxShadow: '0 4px 15px rgba(17, 153, 142, 0.3)',
+              transition: 'transform 0.2s, box-shadow 0.2s'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)'
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(17, 153, 142, 0.4)'
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)'
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(17, 153, 142, 0.3)'
+            }}
+          >
+            🎤 Start Voice Consultation
+          </button>
+        </div>
 
         {/* Error message */}
         {error && (
