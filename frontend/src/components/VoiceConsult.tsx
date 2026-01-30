@@ -206,6 +206,7 @@ function VoiceConsult() {
 
         // Handle JSON control messages
         const message = JSON.parse(event.data)
+        console.log('WebSocket message received:', message.type, message)
 
         switch (message.type) {
           case 'ready':
@@ -235,6 +236,23 @@ function VoiceConsult() {
             break
 
           case 'field_extracted':
+            // Add field to list immediately (will show as unconfirmed)
+            setFields(prev => {
+              const existing = prev.find(f => f.field_name === message.field_name)
+              if (existing) {
+                return prev.map(f =>
+                  f.field_name === message.field_name
+                    ? { ...f, label: message.label, value: message.value, confirmed: false }
+                    : f
+                )
+              }
+              return [...prev, {
+                field_name: message.field_name,
+                label: message.label,
+                value: message.value,
+                confirmed: false
+              }]
+            })
             // Show confirmation popup
             setPendingField({
               field_name: message.field_name,

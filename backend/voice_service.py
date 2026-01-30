@@ -569,6 +569,15 @@ COMPLETION RULES:
                     parsed_fields = json.loads(collected_fields_json)
                     if isinstance(parsed_fields, dict):
                         session.collected_data.update(parsed_fields)
+                        # Send field_extracted events for each field in the summary
+                        for field_name, value in parsed_fields.items():
+                            if value:
+                                session.save_field(field_name, str(value))
+                                label = next(
+                                    (f["label"] for f in session.config.fields if f["name"] == field_name),
+                                    field_name
+                                )
+                                await on_field_extracted(field_name, label, str(value))
                 except json.JSONDecodeError:
                     pass
 
