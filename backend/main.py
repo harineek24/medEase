@@ -19,7 +19,7 @@ from medication_analyzer import analyzer
 # Import database and chat handlers
 import database as db
 from chat_handler import patient_chat, general_chat, check_quick_response, doctor_consultation, generate_consultation_summary
-from voice_service import voice_service, CONSULTATION_FIELDS
+from voice_service import voice_service, CONSULTATION_FIELDS, ConsultationConfig, DEFAULT_CONSULTATION_FIELDS, AVAILABLE_VOICES
 
 # Load environment variables
 load_dotenv()
@@ -1090,6 +1090,212 @@ async def update_field(session_id: str, field_name: str, new_value: str):
         return JSONResponse(content={"success": True, "field_name": field_name, "value": new_value})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Consultation Configuration Admin Endpoints
+# =============================================================================
+
+class ConsultationConfigCreate(BaseModel):
+    """Request model for creating a consultation config"""
+    config_id: str
+    name: str
+    description: Optional[str] = None
+    fields: Optional[List[Dict]] = None
+    ai_prompt: Optional[str] = None
+    system_instruction: Optional[str] = None
+    voice_name: Optional[str] = "Aoede"
+    success_message: Optional[str] = None
+    emergency_message: Optional[str] = None
+    settings: Optional[Dict] = None
+
+
+class ConsultationConfigUpdate(BaseModel):
+    """Request model for updating a consultation config"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    fields: Optional[List[Dict]] = None
+    ai_prompt: Optional[str] = None
+    system_instruction: Optional[str] = None
+    voice_name: Optional[str] = None
+    success_message: Optional[str] = None
+    emergency_message: Optional[str] = None
+    settings: Optional[Dict] = None
+
+
+@app.get("/api/admin/consult/configs")
+async def list_consultation_configs():
+    """
+    List all consultation configurations.
+    Admin endpoint to view all available consultation templates.
+    """
+    try:
+        configs = voice_service.list_configs()
+        return JSONResponse(content={
+            "success": True,
+            "configs": configs,
+            "available_voices": AVAILABLE_VOICES
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/consult/configs/{config_id}")
+async def get_consultation_config(config_id: str):
+    """
+    Get a specific consultation configuration.
+    """
+    try:
+        config = voice_service.get_config(config_id)
+        if not config:
+            raise HTTPException(status_code=404, detail="Configuration not found")
+        return JSONResponse(content={
+            "success": True,
+            "config": config.to_dict()
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/consult/configs")
+async def create_consultation_config(request: ConsultationConfigCreate):
+    """
+    Create a new consultation configuration.
+    Admin endpoint to create custom consultation templates.
+    """
+    try:
+        # Check if config_id already exists
+        existing = voice_service.get_config(request.config_id)
+        if existing:
+            raise HTTPException(status_code=400, detail="Configuration ID already exists")
+
+        config = ConsultationConfig(
+            config_id=request.config_id,
+            name=request.name,
+            description=request.description or "",
+            fields=request.fields or DEFAULT_CONSULTATION_FIELDS,
+            ai_prompt=request.ai_prompt or "",
+            system_instruction=request.system_instruction,
+            voice_name=request.voice_name or "Aoede",
+            success_message=request.success_message or "Thank you for completing the consultation!",
+            emergency_message=request.emergency_message or "This appears to be an emergency. Please call 911 immediately.",
+            settings=request.settings or {}
+        )
+
+        voice_service.create_config(config)
+
+        # Also save to database for persistence
+        db.create_consultation_config(
+            config_id=request.config_id,
+            name=request.name,
+            fields=request.fields or DEFAULT_CONSULTATION_FIELDS,
+            description=request.description,
+            ai_prompt=request.ai_prompt,
+            system_instruction=request.system_instruction,
+            voice_name=request.voice_name or "Aoede",
+            success_message=request.success_message,
+            emergency_message=request.emergency_message,
+            settings=request.settings
+        )
+
+        return JSONResponse(content={
+            "success": True,
+            "config": config.to_dict(),
+            "message": "Configuration created successfully"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/admin/consult/configs/{config_id}")
+async def update_consultation_config(config_id: str, request: ConsultationConfigUpdate):
+    """
+    Update an existing consultation configuration.
+    """
+    try:
+        config = voice_service.get_config(config_id)
+        if not config:
+            raise HTTPException(status_code=404, detail="Configuration not found")
+
+        # Build updates dict with only provided fields
+        updates = {}
+        if request.name is not None:
+            updates['name'] = request.name
+        if request.description is not None:
+            updates['description'] = request.description
+        if request.fields is not None:
+            updates['fields'] = request.fields
+        if request.ai_prompt is not None:
+            updates['ai_prompt'] = request.ai_prompt
+        if request.system_instruction is not None:
+            updates['system_instruction'] = request.system_instruction
+        if request.voice_name is not None:
+            updates['voice_name'] = request.voice_name
+        if request.success_message is not None:
+            updates['success_message'] = request.success_message
+        if request.emergency_message is not None:
+            updates['emergency_message'] = request.emergency_message
+        if request.settings is not None:
+            updates['settings'] = request.settings
+
+        # Update in memory
+        updated_config = voice_service.update_config(config_id, updates)
+
+        # Update in database
+        db.update_consultation_config(config_id, **updates)
+
+        return JSONResponse(content={
+            "success": True,
+            "config": updated_config.to_dict(),
+            "message": "Configuration updated successfully"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/consult/configs/{config_id}")
+async def delete_consultation_config(config_id: str):
+    """
+    Delete a consultation configuration (cannot delete 'default').
+    """
+    try:
+        if config_id == "default":
+            raise HTTPException(status_code=400, detail="Cannot delete the default configuration")
+
+        deleted = voice_service.delete_config(config_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Configuration not found")
+
+        # Also delete from database
+        db.delete_consultation_config(config_id)
+
+        return JSONResponse(content={
+            "success": True,
+            "message": "Configuration deleted successfully"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/consult/default-fields")
+async def get_default_consultation_fields():
+    """
+    Get the default consultation fields template.
+    Useful for creating new configurations.
+    """
+    return JSONResponse(content={
+        "success": True,
+        "fields": DEFAULT_CONSULTATION_FIELDS,
+        "available_voices": AVAILABLE_VOICES
+    })
 
 
 # =============================================================================
