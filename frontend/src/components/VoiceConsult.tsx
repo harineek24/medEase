@@ -94,9 +94,8 @@ function VoiceConsult() {
           pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
         }
 
-        // Send as base64
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(pcmData.buffer)))
-        wsRef.current.send(JSON.stringify({ type: 'audio', data: base64 }))
+        // Send as binary WebSocket frame (matching voicegen pattern)
+        wsRef.current.send(pcmData.buffer)
       }
     }
 
@@ -196,14 +195,23 @@ function VoiceConsult() {
         setStatusText('Connected to Dr. MedAssist')
       }
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
+        // Handle binary audio data (voicegen pattern)
+        if (event.data instanceof Blob) {
+          const arrayBuffer = await event.data.arrayBuffer()
+          audioQueueRef.current.push(arrayBuffer)
+          playAudioQueue()
+          return
+        }
+
+        // Handle JSON control messages
         const message = JSON.parse(event.data)
 
         switch (message.type) {
           case 'ready':
             // Load any existing fields
             if (message.fields?.length > 0) {
-              setFields(message.fields.map((f: any) => ({
+              setFields(message.fields.map((f: { field_name: string; field_label: string; field_value: string; confirmed: number }) => ({
                 field_name: f.field_name,
                 label: f.field_label,
                 value: f.field_value,
@@ -213,7 +221,7 @@ function VoiceConsult() {
             break
 
           case 'audio':
-            // Queue audio for playback
+            // Fallback for base64 audio (backwards compatibility)
             const audioBytes = Uint8Array.from(atob(message.data), c => c.charCodeAt(0))
             audioQueueRef.current.push(audioBytes.buffer)
             playAudioQueue()

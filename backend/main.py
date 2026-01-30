@@ -1317,13 +1317,9 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
         db.create_consultation_session(session_id)
 
     async def on_audio(audio_bytes: bytes):
-        """Send audio back to client"""
+        """Send audio back to client as binary (matching voicegen pattern)"""
         try:
-            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-            await websocket.send_json({
-                "type": "audio",
-                "data": audio_b64
-            })
+            await websocket.send_bytes(audio_bytes)
         except Exception as e:
             print(f"Error sending audio: {e}")
 
