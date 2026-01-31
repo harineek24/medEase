@@ -30,19 +30,24 @@ RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE = 1024
 
 # Default consultation fields - can be overridden by admin config
+# Keeping it focused to 6 essential fields for better reliability
 DEFAULT_CONSULTATION_FIELDS = [
     {"name": "patient_name", "type": "text", "label": "Patient Name", "prompt": "What is your name?", "required": True},
-    {"name": "date_of_birth", "type": "date", "label": "Date of Birth", "prompt": "What is your date of birth?", "required": True},
     {"name": "chief_complaint", "type": "text", "label": "Chief Complaint", "prompt": "What brings you in today? What's your main concern?", "required": True},
     {"name": "symptom_duration", "type": "text", "label": "Duration", "prompt": "How long have you been experiencing this?", "required": True},
-    {"name": "symptom_severity", "type": "number", "label": "Severity", "prompt": "On a scale of 1 to 10, how severe is it?", "required": True},
+    {"name": "symptom_severity", "type": "number", "label": "Severity (1-10)", "prompt": "On a scale of 1 to 10, how severe is it?", "required": True},
+    {"name": "medications", "type": "text", "label": "Current Medications", "prompt": "Are you taking any medications?", "required": True},
+    {"name": "allergies", "type": "text", "label": "Allergies", "prompt": "Do you have any allergies?", "required": True},
+]
+
+# Extended fields available for custom configs
+EXTENDED_CONSULTATION_FIELDS = [
+    {"name": "date_of_birth", "type": "date", "label": "Date of Birth", "prompt": "What is your date of birth?", "required": False},
     {"name": "symptom_location", "type": "text", "label": "Location", "prompt": "Where exactly do you feel the discomfort?", "required": False},
     {"name": "symptom_quality", "type": "text", "label": "Quality", "prompt": "Can you describe what it feels like?", "required": False},
     {"name": "aggravating_factors", "type": "text", "label": "What Makes It Worse", "prompt": "What makes it worse?", "required": False},
     {"name": "relieving_factors", "type": "text", "label": "What Helps", "prompt": "What makes it better?", "required": False},
     {"name": "associated_symptoms", "type": "text", "label": "Other Symptoms", "prompt": "Are you experiencing any other symptoms?", "required": False},
-    {"name": "medications", "type": "text", "label": "Current Medications", "prompt": "What medications are you currently taking?", "required": True},
-    {"name": "allergies", "type": "text", "label": "Allergies", "prompt": "Do you have any allergies?", "required": True},
     {"name": "medical_history", "type": "text", "label": "Medical History", "prompt": "Do you have any significant medical conditions?", "required": False},
 ]
 
@@ -56,18 +61,24 @@ Your role:
 - Conduct a structured medical interview, asking ONE question at a time
 - Be empathetic, patient, and reassuring
 - Speak naturally as if in a real doctor's office
-- After each answer, briefly acknowledge what the patient said before moving to the next question
+
+CRITICAL INSTRUCTION - YOU MUST FOLLOW THIS FOR EVERY RESPONSE:
+After the patient answers ANY question, you MUST:
+1. FIRST: Call save_field() with the information they provided
+2. THEN: Acknowledge what they said
+3. THEN: Ask the next question
+
+NEVER skip calling save_field(). EVERY piece of information must be saved immediately.
+If patient gives multiple pieces of info, call save_field() multiple times.
 
 IMPORTANT RULES:
 - Ask only ONE question at a time
 - Wait for the patient's response before moving on
 - If the patient's answer is unclear, politely ask for clarification
 - Watch for emergency symptoms (chest pain, difficulty breathing, severe bleeding, stroke signs) - if detected, immediately advise calling 911
-- After collecting all information, provide a brief summary and general recommendations
-- Always remind patients this is not a substitute for in-person medical care
 
-COMPLETION RULES:
-- When you have collected all required information, call submit_consultation_summary with a JSON summary
+COMPLETION:
+- After ALL fields are collected, call submit_consultation_summary
 - Then say "Thank you! Your consultation summary has been saved." and call complete_consultation
 """
 
