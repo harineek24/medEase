@@ -79,8 +79,10 @@ IMPORTANT RULES:
 - Always remind patients this is not a substitute for in-person medical care
 
 COMPLETION RULES:
-- When you have collected all required information, call submit_consultation_summary with a JSON summary
+- When you have collected all required information, call submit_consultation_summary with just a brief summary
 - Then say "Thank you! Your consultation summary has been saved." and call complete_consultation
+
+REMEMBER: save_field() is the ONLY way to save patient data. Call it after EVERY answer. submit_consultation_summary does NOT save any fields.
 """
 
 # Available voice options for Gemini
@@ -330,14 +332,13 @@ STYLE RULES:
 {context}
 
 TOOL USAGE - EXTREMELY IMPORTANT:
-You MUST call save_field() IMMEDIATELY after the patient answers each question.
-Do NOT wait until the end - call save_field() right after each answer is given.
-This is critical for the Doctor's Notes to update in real-time on the screen.
+save_field() is the ONLY way to record patient information. You MUST call it IMMEDIATELY after EVERY answer.
+There is NO other way to save data - submit_consultation_summary does NOT save fields.
+If you don't call save_field(), the information will be LOST.
 
 COMPLETION RULES:
-- When you have enough information, call submit_consultation_summary with:
-  {{"summary_text": "<1-2 sentence summary>", "collected_fields": "<JSON of all collected fields>"}}
-- After calling submit_consultation_summary, say "{config.success_message}" and call complete_consultation
+- After collecting all information, call submit_consultation_summary with just a brief summary_text
+- Then say "{config.success_message}" and call complete_consultation
 """
 
     def get_tools_config(self, session: ConsultationSession) -> List[Dict]:
@@ -385,20 +386,16 @@ COMPLETION RULES:
                     },
                     {
                         "name": "submit_consultation_summary",
-                        "description": "Submit a summary of the consultation with all collected information",
+                        "description": "Submit a brief summary to end the consultation. NOTE: This does NOT save any field data - you MUST use save_field() for each piece of patient information during the conversation.",
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "summary_text": {
                                     "type": "string",
                                     "description": "A brief 1-2 sentence summary of the consultation"
-                                },
-                                "collected_fields": {
-                                    "type": "string",
-                                    "description": "JSON string of all collected field values"
                                 }
                             },
-                            "required": ["summary_text", "collected_fields"]
+                            "required": ["summary_text"]
                         }
                     },
                     {
@@ -587,23 +584,8 @@ COMPLETION RULES:
 
             elif name == 'submit_consultation_summary':
                 summary_text = args.get('summary_text', '')
-                collected_fields_json = args.get('collected_fields', '{}')
-
-                try:
-                    parsed_fields = json.loads(collected_fields_json)
-                    if isinstance(parsed_fields, dict):
-                        session.collected_data.update(parsed_fields)
-                        # Send field_extracted events for each field in the summary
-                        for field_name, value in parsed_fields.items():
-                            if value:
-                                session.save_field(field_name, str(value))
-                                label = next(
-                                    (f["label"] for f in session.config.fields if f["name"] == field_name),
-                                    field_name
-                                )
-                                await on_field_extracted(field_name, label, str(value))
-                except json.JSONDecodeError:
-                    pass
+                print(f"📝 [Voice] Consultation summary: {summary_text}")
+                print(f"📊 [Voice] Fields collected via save_field: {len(session.fields)}/{len(session.config.fields)}")
 
                 session.conversation_history.append({
                     "role": "system",
