@@ -317,8 +317,14 @@ STYLE RULES:
 - Use a warm, reassuring tone
 {context}
 
-COMPLETION RULES:
-- When you have enough information, call submit_consultation_summary with:
+CRITICAL - REAL-TIME DATA CAPTURE:
+- IMMEDIATELY call save_field() after the patient provides ANY piece of information
+- Do NOT wait until the end - call save_field() right away for each field
+- Example: If patient says "My name is John and I have a headache", call save_field for BOTH pieces immediately
+- Call save_field() even for partial or approximate information
+
+COMPLETION RULES (only after ALL information is collected):
+- When you have collected all fields, call submit_consultation_summary with:
   {{"summary_text": "<1-2 sentence summary>", "collected_fields": "<JSON of all collected fields>"}}
 - After calling submit_consultation_summary, say "{config.success_message}" and call complete_consultation
 """
@@ -335,7 +341,7 @@ COMPLETION RULES:
                 "function_declarations": [
                     {
                         "name": "save_field",
-                        "description": "Save a piece of information collected from the patient",
+                        "description": "IMMEDIATELY save a piece of information as soon as the patient provides it. Call this RIGHT AWAY after hearing any relevant information - do not wait.",
                         "parameters": {
                             "type": "object",
                             "properties": {
