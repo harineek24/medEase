@@ -473,7 +473,8 @@ COMPLETION RULES:
                             break
 
                 async def receive_from_gemini():
-                    """Receive responses from Gemini"""
+                    """Receive responses from Gemini (following voicegen pattern)"""
+                    print("Starting to receive from Gemini...")
                     while session.is_active:
                         try:
                             turn = live_session.receive()
@@ -481,16 +482,37 @@ COMPLETION RULES:
                                 if not session.is_active:
                                     break
 
-                                # Handle audio data
+                                # Handle audio data first
                                 if data := getattr(response, 'data', None):
                                     await on_audio(data)
+                                    continue
 
-                                # Handle text (for transcripts)
+                                # Debug: log response structure
+                                print(f"Response type: {type(response)}")
+
+                                # Try to extract text from various places (voicegen pattern)
+                                text_content = None
                                 if text := getattr(response, 'text', None):
-                                    await on_text(text)
+                                    text_content = text
+                                    print(f"Found text in response.text: {text_content}")
+
+                                # Check server_content (Gemini sends text here in audio mode)
+                                if hasattr(response, 'server_content') and response.server_content:
+                                    sc = response.server_content
+                                    if hasattr(sc, 'model_turn') and sc.model_turn:
+                                        mt = sc.model_turn
+                                        if hasattr(mt, 'parts') and mt.parts:
+                                            for part in mt.parts:
+                                                if hasattr(part, 'text') and part.text:
+                                                    text_content = part.text
+                                                    print(f"Found text in server_content: {text_content}")
+                                                    break
+
+                                if text_content:
+                                    await on_text(text_content)
                                     session.conversation_history.append({
                                         "role": "assistant",
-                                        "content": text,
+                                        "content": text_content,
                                         "timestamp": datetime.now().isoformat()
                                     })
 
@@ -504,6 +526,8 @@ COMPLETION RULES:
                             break
                         except Exception as e:
                             print(f"Error receiving from Gemini: {e}")
+                            import traceback
+                            traceback.print_exc()
                             break
 
                 # Run tasks concurrently
@@ -534,9 +558,13 @@ COMPLETION RULES:
         """Process tool calls from Gemini response"""
         calls = self._extract_tool_calls(response)
 
+        if calls:
+            print(f"Found {len(calls)} tool call(s): {[c.get('name') for c in calls]}")
+
         for call in calls:
             name = call.get('name', '').strip()
             args = call.get('args', {})
+            print(f"Processing tool call: {name} with args: {args}")
 
             if name == 'save_field':
                 field_name = args.get('field_name') or args.get('fieldName')
