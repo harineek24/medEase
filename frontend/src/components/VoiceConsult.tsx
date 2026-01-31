@@ -210,8 +210,10 @@ function VoiceConsult() {
 
         switch (message.type) {
           case 'ready':
+            console.log('✅ READY: Session initialized', message)
             // Load any existing fields
             if (message.fields?.length > 0) {
+              console.log('📋 Loading existing fields:', message.fields)
               setFields(message.fields.map((f: { field_name: string; field_label: string; field_value: string; confirmed: number }) => ({
                 field_name: f.field_name,
                 label: f.field_label,
@@ -223,12 +225,14 @@ function VoiceConsult() {
 
           case 'audio':
             // Fallback for base64 audio (backwards compatibility)
+            console.log('🔊 Received base64 audio data')
             const audioBytes = Uint8Array.from(atob(message.data), c => c.charCodeAt(0))
             audioQueueRef.current.push(audioBytes.buffer)
             playAudioQueue()
             break
 
           case 'transcript':
+            console.log('💬 TRANSCRIPT:', message.role, message.text)
             setTranscripts(prev => [...prev, { role: message.role, text: message.text }])
             if (message.role === 'assistant') {
               setDoctorState('speaking')
@@ -236,24 +240,32 @@ function VoiceConsult() {
             break
 
           case 'field_extracted':
+            console.log('🎯 FIELD_EXTRACTED received:', {
+              field_name: message.field_name,
+              label: message.label,
+              value: message.value
+            })
             // Add field to list immediately (will show as unconfirmed)
             setFields(prev => {
+              console.log('📝 Current fields before update:', prev)
               const existing = prev.find(f => f.field_name === message.field_name)
-              if (existing) {
-                return prev.map(f =>
-                  f.field_name === message.field_name
-                    ? { ...f, label: message.label, value: message.value, confirmed: false }
-                    : f
-                )
-              }
-              return [...prev, {
-                field_name: message.field_name,
-                label: message.label,
-                value: message.value,
-                confirmed: false
-              }]
+              const newFields = existing
+                ? prev.map(f =>
+                    f.field_name === message.field_name
+                      ? { ...f, label: message.label, value: message.value, confirmed: false }
+                      : f
+                  )
+                : [...prev, {
+                    field_name: message.field_name,
+                    label: message.label,
+                    value: message.value,
+                    confirmed: false
+                  }]
+              console.log('📝 Fields after update:', newFields)
+              return newFields
             })
             // Show confirmation popup
+            console.log('🔔 Setting pendingField for popup:', message.field_name)
             setPendingField({
               field_name: message.field_name,
               label: message.label,
@@ -264,6 +276,7 @@ function VoiceConsult() {
 
           case 'field_confirmed':
           case 'field_updated':
+            console.log('✅ FIELD_CONFIRMED/UPDATED:', message.field_name, message.value)
             // Update fields list
             setFields(prev => {
               const existing = prev.find(f => f.field_name === message.field_name)
@@ -280,10 +293,14 @@ function VoiceConsult() {
             break
 
           case 'emergency':
+            console.log('🚨 EMERGENCY:', message.reason)
             setStatusText(`EMERGENCY: ${message.reason}`)
             // Show emergency alert
             alert(`EMERGENCY: ${message.reason}\n\nPlease call 911 immediately if you are experiencing a medical emergency.`)
             break
+
+          default:
+            console.log('❓ Unknown message type:', message.type, message)
         }
       }
 

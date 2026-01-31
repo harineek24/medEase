@@ -1319,47 +1319,61 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
     async def on_audio(audio_bytes: bytes):
         """Send audio back to client as binary (matching voicegen pattern)"""
         try:
+            print(f"🔊 [WS] Sending {len(audio_bytes)} bytes of audio to client")
             await websocket.send_bytes(audio_bytes)
         except Exception as e:
-            print(f"Error sending audio: {e}")
+            print(f"❌ [WS] Error sending audio: {e}")
 
     async def on_text(text: str):
         """Send text transcript to client"""
         try:
+            print(f"💬 [WS] Sending transcript to client: {text[:100]}...")
             await websocket.send_json({
                 "type": "transcript",
                 "text": text,
                 "role": "assistant"
             })
         except Exception as e:
-            print(f"Error sending text: {e}")
+            print(f"❌ [WS] Error sending text: {e}")
 
     async def on_field_extracted(field_name: str, label: str, value: str):
         """Send field extraction notification to client for confirmation"""
         try:
+            print(f"🎯 [WS] FIELD EXTRACTED - Sending to client:")
+            print(f"    field_name: {field_name}")
+            print(f"    label: {label}")
+            print(f"    value: {value}")
+
             # Save to database (unconfirmed)
             db.save_consultation_field(session_id, field_name, label, value, confirmed=False)
+            print(f"💾 [WS] Saved field to database (unconfirmed)")
 
-            await websocket.send_json({
+            msg = {
                 "type": "field_extracted",
                 "field_name": field_name,
                 "label": label,
                 "value": value,
                 "needs_confirmation": True
-            })
+            }
+            print(f"📤 [WS] Sending WebSocket message: {msg}")
+            await websocket.send_json(msg)
+            print(f"✅ [WS] field_extracted message sent successfully")
         except Exception as e:
-            print(f"Error sending field: {e}")
+            print(f"❌ [WS] Error sending field: {e}")
+            import traceback
+            traceback.print_exc()
 
     async def on_emergency(reason: str):
         """Send emergency alert to client"""
         try:
+            print(f"🚨 [WS] EMERGENCY - Sending to client: {reason}")
             db.update_consultation_session(session_id, is_emergency=True)
             await websocket.send_json({
                 "type": "emergency",
                 "reason": reason
             })
         except Exception as e:
-            print(f"Error sending emergency: {e}")
+            print(f"❌ [WS] Error sending emergency: {e}")
 
     # Start the audio processing in background
     audio_task = asyncio.create_task(
@@ -1371,12 +1385,15 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
     try:
         # Send ready message with session info
         existing_fields = db.get_consultation_fields(session_id)
+        print(f"✅ [WS] Session {session_id} connected, sending ready message")
+        print(f"📋 [WS] Existing fields: {existing_fields}")
         await websocket.send_json({
             "type": "ready",
             "session_id": session_id,
             "fields": existing_fields,
             "message": "Connected to Dr. MedAssist"
         })
+        print(f"✅ [WS] Ready message sent successfully")
 
         # Handle incoming messages
         while True:
