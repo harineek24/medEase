@@ -7,12 +7,6 @@ interface ConsultationField {
   confirmed: boolean
 }
 
-interface PendingField {
-  field_name: string
-  label: string
-  value: string
-}
-
 type DoctorState = 'idle' | 'listening' | 'speaking' | 'thinking'
 
 function VoiceConsult() {
@@ -28,10 +22,9 @@ function VoiceConsult() {
   // Collected fields (doctor's notes)
   const [fields, setFields] = useState<ConsultationField[]>([])
 
-  // Pending confirmation
-  const [pendingField, setPendingField] = useState<PendingField | null>(null)
+  // Inline editing state
+  const [editingFieldName, setEditingFieldName] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
-  const [isEditing, setIsEditing] = useState(false)
 
   // Transcripts (stored for potential future use in displaying conversation)
   const [, setTranscripts] = useState<Array<{ role: string; text: string }>>([])
@@ -245,33 +238,25 @@ function VoiceConsult() {
               label: message.label,
               value: message.value
             })
-            // Add field to list immediately (will show as unconfirmed)
+            // Add field to list immediately - auto-confirmed (no popup needed)
             setFields(prev => {
               console.log('📝 Current fields before update:', prev)
               const existing = prev.find(f => f.field_name === message.field_name)
               const newFields = existing
                 ? prev.map(f =>
                     f.field_name === message.field_name
-                      ? { ...f, label: message.label, value: message.value, confirmed: false }
+                      ? { ...f, label: message.label, value: message.value, confirmed: true }
                       : f
                   )
                 : [...prev, {
                     field_name: message.field_name,
                     label: message.label,
                     value: message.value,
-                    confirmed: false
+                    confirmed: true
                   }]
               console.log('📝 Fields after update:', newFields)
               return newFields
             })
-            // Show confirmation popup
-            console.log('🔔 Setting pendingField for popup:', message.field_name)
-            setPendingField({
-              field_name: message.field_name,
-              label: message.label,
-              value: message.value
-            })
-            setEditValue(message.value)
             break
 
           case 'field_confirmed':
@@ -289,7 +274,8 @@ function VoiceConsult() {
               }
               return prev
             })
-            setPendingField(null)
+            // Clear inline editing if this field was being edited
+            setEditingFieldName(null)
             break
 
           case 'emergency':
@@ -355,59 +341,48 @@ function VoiceConsult() {
     setStatusText('Session ended')
   }
 
-  // Confirm field
-  const confirmField = () => {
-    if (!pendingField || !wsRef.current) return
-
-    wsRef.current.send(JSON.stringify({
-      type: 'confirm_field',
-      field_name: pendingField.field_name
-    }))
-
-    // Add to fields list
-    setFields(prev => [...prev, {
-      field_name: pendingField.field_name,
-      label: pendingField.label,
-      value: pendingField.value,
-      confirmed: true
-    }])
-
-    setPendingField(null)
-    setIsEditing(false)
+  // Start editing a field inline
+  const startEditingField = (field: ConsultationField) => {
+    setEditingFieldName(field.field_name)
+    setEditValue(field.value)
   }
 
-  // Edit and confirm field
-  const editAndConfirm = () => {
-    if (!pendingField || !wsRef.current) return
+  // Save inline edit
+  const saveInlineEdit = (fieldName: string, label: string) => {
+    if (!wsRef.current) return
 
+    // Send edit to backend
     wsRef.current.send(JSON.stringify({
       type: 'edit_field',
-      field_name: pendingField.field_name,
-      label: pendingField.label,
+      field_name: fieldName,
+      label: label,
       value: editValue
     }))
 
-    // Add to fields list with edited value
-    setFields(prev => [...prev, {
-      field_name: pendingField.field_name,
-      label: pendingField.label,
-      value: editValue,
-      confirmed: true
-    }])
+    // Update local state immediately
+    setFields(prev => prev.map(f =>
+      f.field_name === fieldName
+        ? { ...f, value: editValue, confirmed: true }
+        : f
+    ))
 
-    setPendingField(null)
-    setIsEditing(false)
+    setEditingFieldName(null)
+    setEditValue('')
   }
 
-  // Edit existing field
-  const editExistingField = (field: ConsultationField) => {
-    setPendingField({
-      field_name: field.field_name,
-      label: field.label,
-      value: field.value
-    })
-    setEditValue(field.value)
-    setIsEditing(true)
+  // Cancel inline edit
+  const cancelInlineEdit = () => {
+    setEditingFieldName(null)
+    setEditValue('')
+  }
+
+  // Handle keyboard events for inline edit
+  const handleEditKeyDown = (e: React.KeyboardEvent, fieldName: string, label: string) => {
+    if (e.key === 'Enter') {
+      saveInlineEdit(fieldName, label)
+    } else if (e.key === 'Escape') {
+      cancelInlineEdit()
+    }
   }
 
   // Get summary
@@ -492,19 +467,53 @@ function VoiceConsult() {
                 {fields.map((field, index) => (
                   <div
                     key={field.field_name}
-                    className={`note-field ${field.confirmed ? 'confirmed' : ''}`}
+                    className={`note-field ${field.confirmed ? 'confirmed' : ''} ${editingFieldName === field.field_name ? 'editing' : ''}`}
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
                     <div className="note-label">{field.label}:</div>
-                    <div className="note-value">{field.value}</div>
-                    <button
-                      className="note-edit-btn"
-                      onClick={() => editExistingField(field)}
-                      title="Edit this field"
-                    >
-                      edit
-                    </button>
-                    {field.confirmed && <span className="note-check">ok</span>}
+                    {editingFieldName === field.field_name ? (
+                      <div className="note-edit-inline">
+                        <input
+                          type="text"
+                          className="note-edit-input"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onKeyDown={(e) => handleEditKeyDown(e, field.field_name, field.label)}
+                          autoFocus
+                        />
+                        <button
+                          className="note-save-btn"
+                          onClick={() => saveInlineEdit(field.field_name, field.label)}
+                          title="Save"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          className="note-cancel-btn"
+                          onClick={cancelInlineEdit}
+                          title="Cancel"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div
+                          className="note-value"
+                          onClick={() => startEditingField(field)}
+                          title="Click to edit"
+                        >
+                          {field.value}
+                        </div>
+                        <button
+                          className="note-edit-btn"
+                          onClick={() => startEditingField(field)}
+                          title="Edit this field"
+                        >
+                          ✎
+                        </button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -627,55 +636,6 @@ function VoiceConsult() {
         </div>
       </div>
 
-      {/* Confirmation Popup */}
-      {pendingField && (
-        <div className="confirmation-overlay">
-          <div className="confirmation-popup">
-            <div className="popup-header">
-              <span className="popup-icon">👂</span>
-              <h3>I heard:</h3>
-            </div>
-
-            <div className="popup-content">
-              <div className="popup-field-label">{pendingField.label}</div>
-
-              {isEditing ? (
-                <input
-                  type="text"
-                  className="popup-edit-input"
-                  value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  autoFocus
-                />
-              ) : (
-                <div className="popup-field-value">{pendingField.value}</div>
-              )}
-            </div>
-
-            <div className="popup-actions">
-              {isEditing ? (
-                <>
-                  <button className="popup-cancel" onClick={() => setIsEditing(false)}>
-                    Cancel
-                  </button>
-                  <button className="popup-save" onClick={editAndConfirm}>
-                    Save
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button className="popup-edit" onClick={() => setIsEditing(true)}>
-                    <span>edit</span> Edit
-                  </button>
-                  <button className="popup-confirm" onClick={confirmField}>
-                    <span>ok</span> Yes, correct
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
