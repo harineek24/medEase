@@ -30,24 +30,19 @@ RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE = 1024
 
 # Default consultation fields - can be overridden by admin config
-# Keeping it focused to 6 essential fields for better reliability
 DEFAULT_CONSULTATION_FIELDS = [
     {"name": "patient_name", "type": "text", "label": "Patient Name", "prompt": "What is your name?", "required": True},
+    {"name": "date_of_birth", "type": "date", "label": "Date of Birth", "prompt": "What is your date of birth?", "required": True},
     {"name": "chief_complaint", "type": "text", "label": "Chief Complaint", "prompt": "What brings you in today? What's your main concern?", "required": True},
     {"name": "symptom_duration", "type": "text", "label": "Duration", "prompt": "How long have you been experiencing this?", "required": True},
-    {"name": "symptom_severity", "type": "number", "label": "Severity (1-10)", "prompt": "On a scale of 1 to 10, how severe is it?", "required": True},
-    {"name": "medications", "type": "text", "label": "Current Medications", "prompt": "Are you taking any medications?", "required": True},
-    {"name": "allergies", "type": "text", "label": "Allergies", "prompt": "Do you have any allergies?", "required": True},
-]
-
-# Extended fields available for custom configs
-EXTENDED_CONSULTATION_FIELDS = [
-    {"name": "date_of_birth", "type": "date", "label": "Date of Birth", "prompt": "What is your date of birth?", "required": False},
+    {"name": "symptom_severity", "type": "number", "label": "Severity", "prompt": "On a scale of 1 to 10, how severe is it?", "required": True},
     {"name": "symptom_location", "type": "text", "label": "Location", "prompt": "Where exactly do you feel the discomfort?", "required": False},
     {"name": "symptom_quality", "type": "text", "label": "Quality", "prompt": "Can you describe what it feels like?", "required": False},
     {"name": "aggravating_factors", "type": "text", "label": "What Makes It Worse", "prompt": "What makes it worse?", "required": False},
     {"name": "relieving_factors", "type": "text", "label": "What Helps", "prompt": "What makes it better?", "required": False},
     {"name": "associated_symptoms", "type": "text", "label": "Other Symptoms", "prompt": "Are you experiencing any other symptoms?", "required": False},
+    {"name": "medications", "type": "text", "label": "Current Medications", "prompt": "What medications are you currently taking?", "required": True},
+    {"name": "allergies", "type": "text", "label": "Allergies", "prompt": "Do you have any allergies?", "required": True},
     {"name": "medical_history", "type": "text", "label": "Medical History", "prompt": "Do you have any significant medical conditions?", "required": False},
 ]
 
@@ -62,24 +57,32 @@ Your role:
 - Be empathetic, patient, and reassuring
 - Speak naturally as if in a real doctor's office
 
-CRITICAL INSTRUCTION - YOU MUST FOLLOW THIS FOR EVERY RESPONSE:
+CRITICAL INSTRUCTION - SAVE FIELDS IMMEDIATELY:
 After the patient answers ANY question, you MUST:
-1. FIRST: Call save_field() with the information they provided
-2. THEN: Acknowledge what they said
-3. THEN: Ask the next question
+1. IMMEDIATELY call save_field() with the field_name and value from their answer
+2. THEN acknowledge what they said briefly
+3. THEN ask the next question
 
-NEVER skip calling save_field(). EVERY piece of information must be saved immediately.
-If patient gives multiple pieces of info, call save_field() multiple times.
+Example flow:
+- You ask: "What is your name?"
+- Patient says: "I'm John Smith"
+- You MUST call: save_field(field_name="patient_name", value="John Smith")
+- Then say: "Nice to meet you, John. What brings you in today?"
+
+NEVER skip calling save_field(). Call it for EVERY piece of information immediately when the patient provides it.
 
 IMPORTANT RULES:
 - Ask only ONE question at a time
 - Wait for the patient's response before moving on
 - If the patient's answer is unclear, politely ask for clarification
-- Watch for emergency symptoms (chest pain, difficulty breathing, severe bleeding, stroke signs) - if detected, immediately advise calling 911
+- Watch for emergency symptoms (chest pain, difficulty breathing, severe bleeding, stroke signs) - if detected, call flag_emergency and advise calling 911
+- Always remind patients this is not a substitute for in-person medical care
 
-COMPLETION:
-- After ALL fields are collected, call submit_consultation_summary
+COMPLETION RULES:
+- When you have collected all required information, call submit_consultation_summary with just a brief summary
 - Then say "Thank you! Your consultation summary has been saved." and call complete_consultation
+
+REMEMBER: save_field() is the ONLY way to save patient data. Call it after EVERY answer. submit_consultation_summary does NOT save any fields.
 """
 
 # Available voice options for Gemini
@@ -328,16 +331,14 @@ STYLE RULES:
 - Use a warm, reassuring tone
 {context}
 
-CRITICAL - REAL-TIME DATA CAPTURE:
-- IMMEDIATELY call save_field() after the patient provides ANY piece of information
-- Do NOT wait until the end - call save_field() right away for each field
-- Example: If patient says "My name is John and I have a headache", call save_field for BOTH pieces immediately
-- Call save_field() even for partial or approximate information
+TOOL USAGE - EXTREMELY IMPORTANT:
+save_field() is the ONLY way to record patient information. You MUST call it IMMEDIATELY after EVERY answer.
+There is NO other way to save data - submit_consultation_summary does NOT save fields.
+If you don't call save_field(), the information will be LOST.
 
-COMPLETION RULES (only after ALL information is collected):
-- When you have collected all fields, call submit_consultation_summary with:
-  {{"summary_text": "<1-2 sentence summary>", "collected_fields": "<JSON of all collected fields>"}}
-- After calling submit_consultation_summary, say "{config.success_message}" and call complete_consultation
+COMPLETION RULES:
+- After collecting all information, call submit_consultation_summary with just a brief summary_text
+- Then say "{config.success_message}" and call complete_consultation
 """
 
     def get_tools_config(self, session: ConsultationSession) -> List[Dict]:
@@ -352,7 +353,7 @@ COMPLETION RULES (only after ALL information is collected):
                 "function_declarations": [
                     {
                         "name": "save_field",
-                        "description": "IMMEDIATELY save a piece of information as soon as the patient provides it. Call this RIGHT AWAY after hearing any relevant information - do not wait.",
+                        "description": "Save a piece of information collected from the patient",
                         "parameters": {
                             "type": "object",
                             "properties": {
@@ -385,20 +386,16 @@ COMPLETION RULES (only after ALL information is collected):
                     },
                     {
                         "name": "submit_consultation_summary",
-                        "description": "Submit a summary of the consultation with all collected information",
+                        "description": "Submit a brief summary to end the consultation. NOTE: This does NOT save any field data - you MUST use save_field() for each piece of patient information during the conversation.",
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "summary_text": {
                                     "type": "string",
                                     "description": "A brief 1-2 sentence summary of the consultation"
-                                },
-                                "collected_fields": {
-                                    "type": "string",
-                                    "description": "JSON string of all collected field values"
                                 }
                             },
-                            "required": ["summary_text", "collected_fields"]
+                            "required": ["summary_text"]
                         }
                     },
                     {
@@ -490,8 +487,7 @@ COMPLETION RULES (only after ALL information is collected):
                             break
 
                 async def receive_from_gemini():
-                    """Receive responses from Gemini (following voicegen pattern)"""
-                    print("Starting to receive from Gemini...")
+                    """Receive responses from Gemini"""
                     while session.is_active:
                         try:
                             turn = live_session.receive()
@@ -499,37 +495,16 @@ COMPLETION RULES (only after ALL information is collected):
                                 if not session.is_active:
                                     break
 
-                                # Handle audio data first
+                                # Handle audio data
                                 if data := getattr(response, 'data', None):
                                     await on_audio(data)
-                                    continue
 
-                                # Debug: log response structure
-                                print(f"Response type: {type(response)}")
-
-                                # Try to extract text from various places (voicegen pattern)
-                                text_content = None
+                                # Handle text (for transcripts)
                                 if text := getattr(response, 'text', None):
-                                    text_content = text
-                                    print(f"Found text in response.text: {text_content}")
-
-                                # Check server_content (Gemini sends text here in audio mode)
-                                if hasattr(response, 'server_content') and response.server_content:
-                                    sc = response.server_content
-                                    if hasattr(sc, 'model_turn') and sc.model_turn:
-                                        mt = sc.model_turn
-                                        if hasattr(mt, 'parts') and mt.parts:
-                                            for part in mt.parts:
-                                                if hasattr(part, 'text') and part.text:
-                                                    text_content = part.text
-                                                    print(f"Found text in server_content: {text_content}")
-                                                    break
-
-                                if text_content:
-                                    await on_text(text_content)
+                                    await on_text(text)
                                     session.conversation_history.append({
                                         "role": "assistant",
-                                        "content": text_content,
+                                        "content": text,
                                         "timestamp": datetime.now().isoformat()
                                     })
 
@@ -543,8 +518,6 @@ COMPLETION RULES (only after ALL information is collected):
                             break
                         except Exception as e:
                             print(f"Error receiving from Gemini: {e}")
-                            import traceback
-                            traceback.print_exc()
                             break
 
                 # Run tasks concurrently
@@ -576,16 +549,16 @@ COMPLETION RULES (only after ALL information is collected):
         calls = self._extract_tool_calls(response)
 
         if calls:
-            print(f"Found {len(calls)} tool call(s): {[c.get('name') for c in calls]}")
+            print(f"🔧 [Voice] Processing {len(calls)} tool call(s)")
 
         for call in calls:
             name = call.get('name', '').strip()
             args = call.get('args', {})
-            print(f"Processing tool call: {name} with args: {args}")
 
             if name == 'save_field':
                 field_name = args.get('field_name') or args.get('fieldName')
                 value = args.get('value')
+                print(f"💾 [Voice] save_field called: {field_name} = {value}")
 
                 if field_name and value:
                     session.save_field(field_name, value)
@@ -593,6 +566,7 @@ COMPLETION RULES (only after ALL information is collected):
                         (f["label"] for f in session.config.fields if f["name"] == field_name),
                         field_name
                     )
+                    print(f"📤 [Voice] Sending field to frontend: {field_name} ({label}) = {value}")
                     await on_field_extracted(field_name, label, value)
 
                     if on_progress:
@@ -600,6 +574,8 @@ COMPLETION RULES (only after ALL information is collected):
                             len(session.fields),
                             len(session.config.fields)
                         )
+                else:
+                    print(f"⚠️ [Voice] save_field missing field_name or value: {args}")
 
             elif name == 'flag_emergency':
                 reason = args.get('reason', 'Emergency symptoms detected')
@@ -608,23 +584,8 @@ COMPLETION RULES (only after ALL information is collected):
 
             elif name == 'submit_consultation_summary':
                 summary_text = args.get('summary_text', '')
-                collected_fields_json = args.get('collected_fields', '{}')
-
-                try:
-                    parsed_fields = json.loads(collected_fields_json)
-                    if isinstance(parsed_fields, dict):
-                        session.collected_data.update(parsed_fields)
-                        # Send field_extracted events for each field in the summary
-                        for field_name, value in parsed_fields.items():
-                            if value:
-                                session.save_field(field_name, str(value))
-                                label = next(
-                                    (f["label"] for f in session.config.fields if f["name"] == field_name),
-                                    field_name
-                                )
-                                await on_field_extracted(field_name, label, str(value))
-                except json.JSONDecodeError:
-                    pass
+                print(f"📝 [Voice] Consultation summary: {summary_text}")
+                print(f"📊 [Voice] Fields collected via save_field: {len(session.fields)}/{len(session.config.fields)}")
 
                 session.conversation_history.append({
                     "role": "system",
