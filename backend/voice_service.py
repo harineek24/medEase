@@ -56,14 +56,26 @@ Your role:
 - Conduct a structured medical interview, asking ONE question at a time
 - Be empathetic, patient, and reassuring
 - Speak naturally as if in a real doctor's office
-- After each answer, briefly acknowledge what the patient said before moving to the next question
+
+CRITICAL INSTRUCTION - SAVE FIELDS IMMEDIATELY:
+After the patient answers ANY question, you MUST:
+1. IMMEDIATELY call save_field() with the field_name and value from their answer
+2. THEN acknowledge what they said briefly
+3. THEN ask the next question
+
+Example flow:
+- You ask: "What is your name?"
+- Patient says: "I'm John Smith"
+- You MUST call: save_field(field_name="patient_name", value="John Smith")
+- Then say: "Nice to meet you, John. What brings you in today?"
+
+NEVER skip calling save_field(). Call it for EVERY piece of information immediately when the patient provides it.
 
 IMPORTANT RULES:
 - Ask only ONE question at a time
 - Wait for the patient's response before moving on
 - If the patient's answer is unclear, politely ask for clarification
-- Watch for emergency symptoms (chest pain, difficulty breathing, severe bleeding, stroke signs) - if detected, immediately advise calling 911
-- After collecting all information, provide a brief summary and general recommendations
+- Watch for emergency symptoms (chest pain, difficulty breathing, severe bleeding, stroke signs) - if detected, call flag_emergency and advise calling 911
 - Always remind patients this is not a substitute for in-person medical care
 
 COMPLETION RULES:
@@ -317,6 +329,11 @@ STYLE RULES:
 - Use a warm, reassuring tone
 {context}
 
+TOOL USAGE - EXTREMELY IMPORTANT:
+You MUST call save_field() IMMEDIATELY after the patient answers each question.
+Do NOT wait until the end - call save_field() right after each answer is given.
+This is critical for the Doctor's Notes to update in real-time on the screen.
+
 COMPLETION RULES:
 - When you have enough information, call submit_consultation_summary with:
   {{"summary_text": "<1-2 sentence summary>", "collected_fields": "<JSON of all collected fields>"}}
@@ -534,6 +551,9 @@ COMPLETION RULES:
         """Process tool calls from Gemini response"""
         calls = self._extract_tool_calls(response)
 
+        if calls:
+            print(f"🔧 [Voice] Processing {len(calls)} tool call(s)")
+
         for call in calls:
             name = call.get('name', '').strip()
             args = call.get('args', {})
@@ -541,6 +561,7 @@ COMPLETION RULES:
             if name == 'save_field':
                 field_name = args.get('field_name') or args.get('fieldName')
                 value = args.get('value')
+                print(f"💾 [Voice] save_field called: {field_name} = {value}")
 
                 if field_name and value:
                     session.save_field(field_name, value)
@@ -548,6 +569,7 @@ COMPLETION RULES:
                         (f["label"] for f in session.config.fields if f["name"] == field_name),
                         field_name
                     )
+                    print(f"📤 [Voice] Sending field to frontend: {field_name} ({label}) = {value}")
                     await on_field_extracted(field_name, label, value)
 
                     if on_progress:
@@ -555,6 +577,8 @@ COMPLETION RULES:
                             len(session.fields),
                             len(session.config.fields)
                         )
+                else:
+                    print(f"⚠️ [Voice] save_field missing field_name or value: {args}")
 
             elif name == 'flag_emergency':
                 reason = args.get('reason', 'Emergency symptoms detected')

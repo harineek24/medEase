@@ -1335,20 +1335,20 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
             print(f"Error sending text: {e}")
 
     async def on_field_extracted(field_name: str, label: str, value: str):
-        """Send field extraction notification to client for confirmation"""
+        """Send field extraction notification to client"""
         try:
-            # Save to database (unconfirmed)
-            db.save_consultation_field(session_id, field_name, label, value, confirmed=False)
+            print(f"📋 [WS] Field extracted: {field_name} = {value}")
+            # Save to database (auto-confirmed since we removed popup)
+            db.save_consultation_field(session_id, field_name, label, value, confirmed=True)
 
             await websocket.send_json({
                 "type": "field_extracted",
                 "field_name": field_name,
                 "label": label,
-                "value": value,
-                "needs_confirmation": True
+                "value": value
             })
         except Exception as e:
-            print(f"Error sending field: {e}")
+            print(f"❌ [WS] Error sending field: {e}")
 
     async def on_emergency(reason: str):
         """Send emergency alert to client"""
