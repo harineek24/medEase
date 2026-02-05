@@ -1,6 +1,6 @@
 interface NavigationProps {
-  currentView: 'upload' | 'dashboard' | 'history' | 'chat' | 'consult'
-  onNavigate: (view: 'upload' | 'dashboard' | 'history' | 'chat' | 'consult') => void
+  currentView: 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config'
+  onNavigate: (view: 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config') => void
 }
 
 function Navigation({ currentView, onNavigate }: NavigationProps) {
@@ -50,6 +50,14 @@ function Navigation({ currentView, onNavigate }: NavigationProps) {
         >
           <span className="nav-icon">👨‍⚕️</span>
           <span className="nav-text">Live Consult</span>
+        </button>
+
+        <button
+          className={`nav-link ${currentView === 'config' ? 'active' : ''}`}
+          onClick={() => onNavigate('config')}
+        >
+          <span className="nav-icon">⚙️</span>
+          <span className="nav-text">Config</span>
         </button>
       </div>
     </nav>

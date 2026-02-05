@@ -10,8 +10,9 @@ import GeneralChat from './components/GeneralChat'
 import Dashboard from './components/Dashboard'
 import History from './components/History'
 import VoiceConsult from './components/VoiceConsult'
+import ConsultConfig from './components/ConsultConfig'
 
-type AppView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult'
+type AppView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config'
 type AppState = 'upload' | 'processing' | 'results'
 
 interface SummaryData {
@@ -425,6 +426,9 @@ function App() {
 
       case 'consult':
         return <VoiceConsult />
+
+      case 'config':
+        return <ConsultConfig />
 
       case 'upload':
       default:
