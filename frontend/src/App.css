@@ -4204,7 +4204,7 @@
 }
 
 /* =============================================================================
-   CONSULTATION CONFIG PAGE
+   CONSULTATION CONFIG STYLES
    ============================================================================= */
 
 .consult-config {
@@ -4277,22 +4277,9 @@
   gap: 0.5rem;
 }
 
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group label {
-  display: block;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #374151;
-  margin-bottom: 0.375rem;
-}
-
-.form-group input[type="text"],
-.form-group input[type="email"],
-.form-group textarea,
-.form-group select {
+.config-editor .form-group input[type="text"],
+.config-editor .form-group textarea,
+.config-editor .form-group select {
   width: 100%;
   padding: 0.625rem 0.875rem;
   border: 1px solid #d1d5db;
@@ -4301,9 +4288,9 @@
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.form-group input:focus,
-.form-group textarea:focus,
-.form-group select:focus {
+.config-editor .form-group input:focus,
+.config-editor .form-group textarea:focus,
+.config-editor .form-group select:focus {
   outline: none;
   border-color: #6366f1;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
@@ -4334,7 +4321,6 @@
   cursor: pointer;
 }
 
-/* Fields List */
 .fields-list {
   display: flex;
   flex-direction: column;
@@ -4376,7 +4362,6 @@
   flex: 3;
 }
 
-/* Buttons */
 .btn-primary {
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: white;
@@ -4446,7 +4431,6 @@
   border-top: 1px solid #e5e7eb;
 }
 
-/* Sidebar */
 .config-sidebar {
   display: flex;
   flex-direction: column;
@@ -4479,7 +4463,6 @@
   font-family: 'Monaco', 'Menlo', monospace;
 }
 
-/* Configs List */
 .configs-list {
   display: flex;
   flex-direction: column;
@@ -4507,7 +4490,6 @@
 }
 
 .config-item.active {
-  border-color: #6366f1;
   background: #f5f3ff;
 }
 
@@ -4534,7 +4516,6 @@
   margin-top: 0.75rem;
 }
 
-/* Field Types List */
 .field-types-list {
   list-style: none;
   padding: 0;
@@ -4556,7 +4537,6 @@
   color: #6366f1;
 }
 
-/* Loading State */
 .config-loading {
   display: flex;
   flex-direction: column;
@@ -4565,7 +4545,6 @@
   padding: 4rem;
 }
 
-/* Responsive */
 @media (max-width: 1024px) {
   .config-layout {
     grid-template-columns: 1fr;
@@ -4574,137 +4553,4 @@
   .config-sidebar {
     order: -1;
   }
-}
-
-/* =============================================================================
-   INLINE EDITING FOR DOCTOR'S NOTES
-   ============================================================================= */
-
-.note-field {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  background: #f9fafb;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
-  transition: all 0.2s ease;
-  animation: slideInField 0.3s ease-out forwards;
-  opacity: 0;
-}
-
-@keyframes slideInField {
-  from {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.note-field:hover {
-  background: #f0f4f8;
-}
-
-.note-field.editing {
-  background: #e8f4ff;
-  border: 1px solid #3b82f6;
-}
-
-.note-field.confirmed {
-  border-left: 3px solid #10b981;
-}
-
-.note-label {
-  font-weight: 600;
-  color: #374151;
-  min-width: 100px;
-  font-size: 0.875rem;
-}
-
-.note-value {
-  flex: 1;
-  color: #1f2937;
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-
-.note-value:hover {
-  background: rgba(59, 130, 246, 0.1);
-}
-
-.note-edit-btn {
-  background: none;
-  border: none;
-  color: #6b7280;
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  transition: all 0.2s;
-}
-
-.note-edit-btn:hover {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.note-check {
-  color: #10b981;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-/* Inline Edit Mode */
-.note-edit-inline {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 1;
-}
-
-.note-edit-input {
-  flex: 1;
-  padding: 0.375rem 0.625rem;
-  border: 1px solid #3b82f6;
-  border-radius: 6px;
-  font-size: 0.9375rem;
-  outline: none;
-  background: white;
-}
-
-.note-edit-input:focus {
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-}
-
-.note-save-btn,
-.note-cancel-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0.375rem;
-  border-radius: 4px;
-  font-size: 1rem;
-  line-height: 1;
-  transition: all 0.2s;
-}
-
-.note-save-btn {
-  color: #10b981;
-}
-
-.note-save-btn:hover {
-  background: #d1fae5;
-}
-
-.note-cancel-btn {
-  color: #ef4444;
-}
-
-.note-cancel-btn:hover {
-  background: #fee2e2;
 }

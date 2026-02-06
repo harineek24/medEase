@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { API_BASE_URL } from '../api'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -51,7 +52,7 @@ What would you like to know?`,
     setIsLoading(true)
 
     try {
-      const response = await fetch('http://localhost:8000/api/chat/general', {
+      const response = await fetch(`${API_BASE_URL}/api/chat/general`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

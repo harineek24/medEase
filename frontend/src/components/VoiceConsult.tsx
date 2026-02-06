@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { API_BASE_URL, WS_BASE_URL } from '../api'
 
 interface ConsultationField {
   field_name: string
@@ -168,7 +169,7 @@ function VoiceConsult() {
       }
 
       // Start a new session
-      const response = await fetch('http://localhost:8000/api/consult/start', {
+      const response = await fetch(`${API_BASE_URL}/api/consult/start`, {
         method: 'POST'
       })
 
@@ -178,7 +179,7 @@ function VoiceConsult() {
       setSessionId(data.session_id)
 
       // Connect WebSocket
-      const ws = new WebSocket(`ws://localhost:8000/ws/voice/${data.session_id}`)
+      const ws = new WebSocket(`${WS_BASE_URL}/ws/voice/${data.session_id}`)
 
       ws.onopen = () => {
         console.log('WebSocket connected')
@@ -390,7 +391,7 @@ function VoiceConsult() {
     if (!sessionId) return
 
     try {
-      const response = await fetch('http://localhost:8000/api/consult/summary', {
+      const response = await fetch(`${API_BASE_URL}/api/consult/summary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId })

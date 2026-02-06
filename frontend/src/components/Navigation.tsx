@@ -53,7 +53,7 @@ function Navigation({ currentView, onNavigate }: NavigationProps) {
         </button>
 
         <button
-          className={`nav-link config-link ${currentView === 'config' ? 'active' : ''}`}
+          className={`nav-link ${currentView === 'config' ? 'active' : ''}`}
           onClick={() => onNavigate('config')}
         >
           <span className="nav-icon">⚙️</span>

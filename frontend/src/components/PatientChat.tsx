@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { API_BASE_URL } from '../api'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -55,7 +56,7 @@ function PatientChat({ summaryText, medications, testResults, interactions, pati
     setIsLoading(true)
 
     try {
-      const response = await fetch('http://localhost:8000/api/chat/patient', {
+      const response = await fetch(`${API_BASE_URL}/api/chat/patient`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

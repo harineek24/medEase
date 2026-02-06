@@ -1,5 +1,6 @@
 import { useState, DragEvent, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { API_BASE_URL } from './api'
 import './App.css'
 
 // Import components
@@ -10,8 +11,9 @@ import Dashboard from './components/Dashboard'
 import History from './components/History'
 import VoiceConsult from './components/VoiceConsult'
 import ConsultConfig from './components/ConsultConfig'
+import { Hero } from './components/ui/helix-hero'
 
-type AppView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config'
+type AppView = 'landing' | 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config'
 type AppState = 'upload' | 'processing' | 'results'
 
 interface SummaryData {
@@ -76,8 +78,8 @@ interface DrugInteraction {
 }
 
 function App() {
-  // View state
-  const [currentView, setCurrentView] = useState<AppView>('upload')
+  // View state - start with landing page
+  const [currentView, setCurrentView] = useState<AppView>('landing')
 
   // Upload flow state
   const [appState, setAppState] = useState<AppState>('upload')
@@ -128,7 +130,7 @@ function App() {
     formData.append('file', file)
 
     try {
-      const response = await fetch('http://localhost:8000/api/summarize', {
+      const response = await fetch(`${API_BASE_URL}/api/summarize`, {
         method: 'POST',
         body: formData,
       })
@@ -202,7 +204,7 @@ function App() {
     setSaveStatus('saving')
 
     try {
-      const response = await fetch('http://localhost:8000/api/save-summary', {
+      const response = await fetch(`${API_BASE_URL}/api/save-summary`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -274,7 +276,7 @@ function App() {
       if (summaryData && summaryData.summary) {
         // Extract medications
         try {
-          const medsResponse = await fetch('http://localhost:8000/api/extract-medications', {
+          const medsResponse = await fetch(`${API_BASE_URL}/api/extract-medications`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -290,7 +292,7 @@ function App() {
             // Analyze medications for interactions
             if (extractedMeds.length > 1) {
               try {
-                const analysisResponse = await fetch('http://localhost:8000/api/analyze-medications', {
+                const analysisResponse = await fetch(`${API_BASE_URL}/api/analyze-medications`, {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
@@ -313,7 +315,7 @@ function App() {
 
         // Extract patient overview
         try {
-          const overviewResponse = await fetch('http://localhost:8000/api/extract-patient-overview', {
+          const overviewResponse = await fetch(`${API_BASE_URL}/api/extract-patient-overview`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -336,7 +338,7 @@ function App() {
 
         // Extract test results
         try {
-          const testsResponse = await fetch('http://localhost:8000/api/extract-test-results', {
+          const testsResponse = await fetch(`${API_BASE_URL}/api/extract-test-results`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -368,7 +370,7 @@ function App() {
     setMedicationDetails(null)
 
     try {
-      const response = await fetch('http://localhost:8000/api/medication-details', {
+      const response = await fetch(`${API_BASE_URL}/api/medication-details`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -888,6 +890,17 @@ function App() {
       )}
     </>
   )
+
+  // Show landing page hero
+  if (currentView === 'landing') {
+    return (
+      <Hero
+        title="MedEase"
+        description="Transform complex medical records into clear, actionable insights. Powered by AI to help you understand your health better."
+        onGetStarted={() => setCurrentView('upload')}
+      />
+    )
+  }
 
   return (
     <div className="app">

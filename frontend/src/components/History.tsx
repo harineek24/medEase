@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE_URL } from '../api'
 
 interface Summary {
   id: number
@@ -28,7 +29,7 @@ function History({ onSelectSummary: _onSelectSummary }: HistoryProps) {
 
   const fetchHistory = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/history')
+      const response = await fetch(`${API_BASE_URL}/api/history`)
       if (response.ok) {
         const data = await response.json()
         setSummaries(data.summaries || [])
@@ -53,7 +54,7 @@ function History({ onSelectSummary: _onSelectSummary }: HistoryProps) {
 
   const handleViewDetails = async (summaryId: number) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/history/${summaryId}`)
+      const response = await fetch(`${API_BASE_URL}/api/history/${summaryId}`)
       if (response.ok) {
         const data = await response.json()
         setSelectedSummary(data)

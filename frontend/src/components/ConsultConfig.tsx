@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE_URL } from '../api'
 
 interface ConsultField {
   name: string
@@ -45,7 +46,7 @@ function ConsultConfig() {
 
   const fetchConfigs = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/admin/consult/configs')
+      const response = await fetch(`${API_BASE_URL}/api/admin/consult/configs`)
       if (response.ok) {
         const data = await response.json()
         setConfigs(data.configs || [])
@@ -59,7 +60,7 @@ function ConsultConfig() {
 
   const loadDefaultFields = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/admin/consult/default-fields')
+      const response = await fetch(`${API_BASE_URL}/api/admin/consult/default-fields`)
       if (response.ok) {
         const data = await response.json()
         setFields(data.fields || [])
@@ -130,8 +131,8 @@ function ConsultConfig() {
 
     try {
       const url = editingConfig
-        ? `http://localhost:8000/api/admin/consult/configs/${editingConfig.config_id}`
-        : 'http://localhost:8000/api/admin/consult/configs'
+        ? `${API_BASE_URL}/api/admin/consult/configs/${editingConfig.config_id}`
+        : `${API_BASE_URL}/api/admin/consult/configs`
 
       const response = await fetch(url, {
         method: editingConfig ? 'PUT' : 'POST',
@@ -159,7 +160,7 @@ function ConsultConfig() {
     if (!confirm('Are you sure you want to delete this configuration?')) return
 
     try {
-      const response = await fetch(`http://localhost:8000/api/admin/consult/configs/${configId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/consult/configs/${configId}`, {
         method: 'DELETE'
       })
       if (response.ok) {
