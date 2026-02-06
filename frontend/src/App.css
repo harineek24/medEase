@@ -1,11 +1,11 @@
 /* Root styles */
 :root {
-  --primary-color: #667eea;
-  --primary-dark: #5a67d8;
-  --secondary-color: #764ba2;
+  --primary-color: #45BFD3;
+  --primary-dark: #3aa8ba;
+  --secondary-color: #45BFD3;
   --text-dark: #2d3748;
   --text-secondary: #718096;
-  --background: #f7fafc;
+  --background: #ffffff;
   --card-background: #ffffff;
   --border-color: #e2e8f0;
   --error-color: #e53e3e;
@@ -18,33 +18,36 @@
 /* Global app container */
 .app {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 2rem 1rem;
+  background: #ffffff;
+  padding: 0;
 }
 
 .container {
   max-width: 1200px;
   margin: 0 auto;
+  padding: 2rem 1rem;
 }
 
 /* Header */
 .header {
   text-align: center;
-  color: white;
+  color: #1a202c;
   margin-bottom: 3rem;
+  padding-top: 2rem;
 }
 
 .header h1 {
-  font-size: 3rem;
-  font-weight: 700;
+  font-size: 2.5rem;
+  font-weight: 300;
   margin: 0;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  color: #1a202c;
 }
 
 .subtitle {
-  font-size: 1.25rem;
-  margin: 1rem 0 0 0;
-  opacity: 0.95;
+  font-size: 1.1rem;
+  margin: 0.75rem 0 0 0;
+  color: #718096;
+  font-weight: 300;
 }
 
 /* Error message */
@@ -532,7 +535,7 @@
 }
 
 .medication-pill {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #45BFD3 0%, #3aa8ba 100%);
   color: white;
   padding: 1.5rem;
   border-radius: 20px;
@@ -603,7 +606,7 @@
 
 /* Alternate colors for variety */
 .medication-pill:nth-child(3n + 1) {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #45BFD3 0%, #3aa8ba 100%);
 }
 
 .medication-pill:nth-child(3n + 2) {
@@ -694,7 +697,7 @@
 .modal-header {
   padding: 2rem 2rem 1rem 2rem;
   border-bottom: 2px solid var(--border-color);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #45BFD3 0%, #3aa8ba 100%);
   color: white;
   border-radius: 20px 20px 0 0;
 }
@@ -1462,7 +1465,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1.25rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #45BFD3 0%, #3aa8ba 100%);
   color: white;
   border: none;
   border-radius: 8px;
@@ -1513,7 +1516,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #45BFD3 0%, #3aa8ba 100%);
   color: white;
   border-radius: 16px 16px 0 0;
 }
@@ -1598,7 +1601,7 @@
 }
 
 .chat-message.user .message-content {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #45BFD3 0%, #3aa8ba 100%);
   color: white;
   border-bottom-right-radius: 4px;
 }
@@ -4292,7 +4295,7 @@
 .config-editor .form-group textarea:focus,
 .config-editor .form-group select:focus {
   outline: none;
-  border-color: #6366f1;
+  border-color: #45BFD3;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
 }
 
@@ -4363,7 +4366,7 @@
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  background: linear-gradient(135deg, #45BFD3 0%, #3aa8ba 100%);
   color: white;
   border: none;
   padding: 0.625rem 1.25rem;
@@ -4486,11 +4489,11 @@
 }
 
 .config-item:hover {
-  border-color: #6366f1;
+  border-color: #45BFD3;
 }
 
 .config-item.active {
-  background: #f5f3ff;
+  background: #e6f7f9;
 }
 
 .config-item-info h4 {
@@ -4534,7 +4537,7 @@
 }
 
 .field-types-list strong {
-  color: #6366f1;
+  color: #45BFD3;
 }
 
 .config-loading {
