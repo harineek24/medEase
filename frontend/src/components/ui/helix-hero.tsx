@@ -1,7 +1,10 @@
 import { Canvas, useFrame } from "@react-three/fiber";
+import { Bloom, EffectComposer } from "@react-three/postprocessing";
+import { KernelSize } from "postprocessing";
 import type React from "react";
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import * as THREE from "three";
+import BlurEffect from "react-progressive-blur";
 
 interface HelixRingsProps {
   levelsUp?: number;
@@ -11,18 +14,39 @@ interface HelixRingsProps {
 }
 
 const HelixRings: React.FC<HelixRingsProps> = ({
-  levelsUp = 12,
-  levelsDown = 12,
-  stepY = 0.6,
-  rotationStep = Math.PI / 10,
+  levelsUp = 10,
+  levelsDown = 10,
+  stepY = 0.85,
+  rotationStep = Math.PI / 16,
 }) => {
-  const groupRef = useRef<THREE.Group>(null);
+  const groupRef = useRef<THREE.Group>(new THREE.Group());
 
   useFrame(() => {
     if (groupRef.current) {
-      groupRef.current.rotation.y += 0.004;
+      groupRef.current.rotation.y += 0.005;
     }
   });
+
+  const ringGeometry = useMemo(() => {
+    const shape = new THREE.Shape();
+    const radius = 0.35;
+    shape.absarc(0, 0, radius, 0, Math.PI * 2, false);
+
+    const depth = 10;
+    const extrudeSettings: THREE.ExtrudeGeometryOptions = {
+      depth,
+      bevelEnabled: true,
+      bevelThickness: 0.05,
+      bevelSize: 0.05,
+      bevelSegments: 4,
+      curveSegments: 64,
+    };
+
+    const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    geometry.translate(0, 0, -depth / 2);
+
+    return geometry;
+  }, []);
 
   const elements = [];
   for (let i = -levelsDown; i <= levelsUp; i++) {
@@ -35,23 +59,29 @@ const HelixRings: React.FC<HelixRingsProps> = ({
 
   return (
     <group
-      position={[6, 0, 0]}
+      scale={1}
+      position={[5, 0, 0]}
       ref={groupRef}
-      rotation={[0.3, 0, 0.1]}
+      rotation={[0, 0, 0]}
     >
       {elements.map((el) => (
         <mesh
           key={el.id}
+          geometry={ringGeometry}
           position={[0, el.y, 0]}
-          rotation={[Math.PI / 2, el.rotation, 0]}
+          rotation={[0, Math.PI / 2 + el.rotation, 0]}
+          castShadow
         >
-          <torusGeometry args={[3, 0.15, 16, 100]} />
-          <meshStandardMaterial
+          <meshPhysicalMaterial
             color="#45BFD3"
-            metalness={0.3}
-            roughness={0.4}
-            emissive="#45BFD3"
-            emissiveIntensity={0.1}
+            metalness={0.7}
+            roughness={0.5}
+            clearcoat={0}
+            clearcoatRoughness={0.15}
+            reflectivity={0}
+            iridescence={0.96}
+            iridescenceIOR={1.5}
+            iridescenceThicknessRange={[100, 400]}
           />
         </mesh>
       ))}
@@ -62,19 +92,49 @@ const HelixRings: React.FC<HelixRingsProps> = ({
 const Scene: React.FC = () => {
   return (
     <Canvas
+      className="h-full w-full"
+      orthographic
+      shadows
       camera={{
-        fov: 45,
-        position: [0, 0, 20],
+        zoom: 70,
+        position: [0, 0, 7],
         near: 0.1,
         far: 1000,
       }}
       gl={{ antialias: true }}
       style={{ background: "#ffffff" }}
     >
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[10, 10, 5]} intensity={1.2} color="#ffffff" />
-      <directionalLight position={[-5, -5, -5]} intensity={0.4} color="#45BFD3" />
+      <hemisphereLight
+        color={"#cfe8ff"}
+        groundColor={"#ffffff"}
+        intensity={2}
+      />
+
+      <directionalLight
+        position={[10, 10, 5]}
+        intensity={2}
+        castShadow
+        color={"#ffeedd"}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+      />
+
       <HelixRings />
+
+      <EffectComposer multisampling={8}>
+        <Bloom
+          kernelSize={3}
+          luminanceThreshold={0}
+          luminanceSmoothing={0.4}
+          intensity={0.6}
+        />
+        <Bloom
+          kernelSize={KernelSize.HUGE}
+          luminanceThreshold={0}
+          luminanceSmoothing={0}
+          intensity={0.5}
+        />
+      </EffectComposer>
     </Canvas>
   );
 };
@@ -87,21 +147,18 @@ interface HeroProps {
 
 export const Hero: React.FC<HeroProps> = ({ title, description, onGetStarted }) => {
   return (
-    <section className="relative h-screen w-full font-sans tracking-tight text-gray-900 bg-white overflow-hidden">
-      {/* 3D Helix Background */}
+    <section className="relative h-screen w-screen font-sans tracking-tight text-gray-900 bg-white overflow-hidden">
       <div className="absolute inset-0 z-0">
         <Scene />
       </div>
 
-      {/* Content */}
-      <div className="absolute bottom-8 left-6 md:bottom-16 md:left-12 z-20 max-w-lg">
-        <h1 className="text-4xl md:text-5xl font-light tracking-tight mb-4 text-gray-900">
+      <div className="absolute bottom-4 left-4 md:bottom-10 md:left-10 z-20 max-w-md">
+        <h1 className="text-3xl font-light tracking-tight mb-3">
           {title}
         </h1>
-        <p className="text-gray-600 text-base md:text-lg leading-relaxed font-light tracking-tight mb-6">
+        <p className="text-gray-700 text-sm leading-relaxed font-light tracking-tight mb-4">
           {description}
         </p>
-
         {onGetStarted && (
           <button
             onClick={onGetStarted}
@@ -111,12 +168,16 @@ export const Hero: React.FC<HeroProps> = ({ title, description, onGetStarted }) 
           </button>
         )}
       </div>
-
-      {/* Top blur gradient */}
-      <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-white/80 to-transparent z-10" />
-
-      {/* Bottom blur gradient */}
-      <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-white/90 to-transparent z-10" />
+      <BlurEffect
+        className="absolute bg-gradient-to-b from-transparent to-white/20 h-1/2 md:h-1/3 w-full bottom-0"
+        position="bottom"
+        intensity={50}
+      />
+      <BlurEffect
+        className="absolute bg-gradient-to-b from-white/20 to-transparent h-1/2 md:h-1/3 w-full top-0"
+        position="top"
+        intensity={50}
+      />
     </section>
   );
 };
