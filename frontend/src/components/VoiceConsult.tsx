@@ -1,5 +1,69 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { API_BASE_URL, WS_BASE_URL } from '../api'
+import { Phone, PhoneOff, FileText } from 'lucide-react'
+
+// Stethoscope Heart Component
+const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' | 'thinking' }) => {
+  const heartColor = state === 'speaking' ? '#ef4444' : state === 'listening' ? '#22c55e' : '#374151'
+  const isBeating = state === 'speaking'
+
+  return (
+    <div className="relative w-48 h-48 flex items-center justify-center">
+      <svg viewBox="0 0 100 100" className="w-full h-full">
+        {/* Stethoscope tube - left side */}
+        <path
+          d="M 30 15 Q 15 15 15 35 Q 15 55 25 65 Q 35 75 50 85"
+          fill="none"
+          stroke="#9ca3af"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+        {/* Stethoscope tube - right side */}
+        <path
+          d="M 70 15 Q 85 15 85 35 Q 85 55 75 65 Q 65 75 50 85"
+          fill="none"
+          stroke="#9ca3af"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+        {/* Ear pieces */}
+        <circle cx="30" cy="12" r="4" fill="#1f2937" />
+        <circle cx="70" cy="12" r="4" fill="#1f2937" />
+        {/* Chest piece */}
+        <circle cx="50" cy="90" r="8" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2" />
+        <circle cx="50" cy="90" r="4" fill="#d1d5db" />
+      </svg>
+
+      {/* Heart in the center */}
+      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] ${isBeating ? 'animate-heartbeat' : ''}`}>
+        <svg viewBox="0 0 24 24" className="w-16 h-16" style={{ filter: isBeating ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none' }}>
+          <path
+            d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+            fill={heartColor}
+            className="transition-colors duration-300"
+          />
+        </svg>
+      </div>
+
+      {/* Pulse rings when speaking */}
+      {isBeating && (
+        <>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] w-20 h-20 rounded-full border-2 border-red-400 animate-ping opacity-30" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] w-24 h-24 rounded-full border border-red-300 animate-ping opacity-20" style={{ animationDelay: '0.2s' }} />
+        </>
+      )}
+
+      {/* Listening indicator */}
+      {state === 'listening' && (
+        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+          <div className="w-1 h-3 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+          <div className="w-1 h-4 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+          <div className="w-1 h-3 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface ConsultationField {
   field_name: string
@@ -502,102 +566,65 @@ function VoiceConsult() {
 
         {/* Right Side - Doctor Animation & Controls */}
         <div className="doctor-panel">
-          <div className="doctor-card">
-            {/* Doctor Avatar */}
-            <div className={`doctor-avatar-container ${doctorState}`}>
-              <div className="doctor-avatar-bg"></div>
-              <div className="doctor-figure">
-                <div className="doctor-head">
-                  <div className="doctor-face">
-                    <div className="doctor-eyes">
-                      <div className={`doctor-eye left ${doctorState === 'listening' ? 'attentive' : ''}`}>
-                        <div className="eye-pupil"></div>
-                      </div>
-                      <div className={`doctor-eye right ${doctorState === 'listening' ? 'attentive' : ''}`}>
-                        <div className="eye-pupil"></div>
-                      </div>
-                    </div>
-                    <div className={`doctor-mouth ${doctorState}`}></div>
-                  </div>
-                  <div className="doctor-hair"></div>
-                  <div className="stethoscope"></div>
-                </div>
-                <div className="doctor-body">
-                  <div className="doctor-coat">
-                    <div className="coat-collar"></div>
-                    <div className="name-tag">
-                      <span>Dr. MedAssist</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 flex flex-col items-center">
+            {/* Stethoscope Heart Animation */}
+            <StethoscopeHeart state={doctorState} />
 
-              {/* Sound waves when speaking */}
-              {doctorState === 'speaking' && (
-                <div className="sound-waves">
-                  <div className="wave"></div>
-                  <div className="wave"></div>
-                  <div className="wave"></div>
-                </div>
-              )}
-
-              {/* Listening indicator */}
-              {doctorState === 'listening' && (
-                <div className="listening-indicator">
-                  <div className="pulse-ring"></div>
-                  <div className="mic-icon">🎤</div>
-                </div>
-              )}
-            </div>
-
-            <div className="doctor-info">
-              <h3>Dr. MedAssist</h3>
-              <p className="doctor-specialty">AI Physician Assistant</p>
-              <p className={`doctor-status ${doctorState}`}>{statusText}</p>
+            <div className="text-center mt-4">
+              <h3 className="text-xl font-medium text-gray-900">Dr. MedAssist</h3>
+              <p className="text-sm text-[#45BFD3] mt-1">AI Physician Assistant</p>
+              <p className={`text-sm mt-2 ${
+                doctorState === 'speaking' ? 'text-red-500' :
+                doctorState === 'listening' ? 'text-green-500' :
+                'text-gray-500'
+              }`}>{statusText}</p>
             </div>
 
             {/* Recording indicator */}
             {isRecording && (
-              <div className="recording-indicator">
-                <div className="recording-dot"></div>
+              <div className="flex items-center gap-2 mt-4 text-sm text-red-500">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
                 <span>Recording</span>
               </div>
             )}
           </div>
 
           {/* Control Buttons */}
-          <div className="control-buttons">
+          <div className="flex flex-col gap-3 w-full mt-6">
             {!isConnected ? (
               <button
-                className="connect-btn"
+                className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-[#45BFD3] hover:bg-[#3aa8ba] text-white font-medium rounded-xl transition-all duration-200 shadow-lg disabled:opacity-50"
                 onClick={connect}
                 disabled={isConnecting}
               >
                 {isConnecting ? (
                   <>
-                    <span className="btn-spinner"></span>
-                    Connecting...
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Connecting...</span>
                   </>
                 ) : (
                   <>
-                    <span className="btn-icon">📞</span>
-                    Connect Now
+                    <Phone className="w-5 h-5" />
+                    <span>Connect Now</span>
                   </>
                 )}
               </button>
             ) : (
               <>
-                <button className="end-btn" onClick={disconnect}>
-                  <span className="btn-icon">📴</span>
-                  End Session
+                <button
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl transition-all duration-200"
+                  onClick={disconnect}
+                >
+                  <PhoneOff className="w-5 h-5" />
+                  <span>End Session</span>
                 </button>
                 <button
-                  className="summary-btn"
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl transition-all duration-200 disabled:opacity-50"
                   onClick={getSummary}
                   disabled={fields.length === 0}
                 >
-                  <span className="btn-icon">📋</span>
-                  Get Summary
+                  <FileText className="w-5 h-5" />
+                  <span>Get Summary</span>
                 </button>
               </>
             )}
@@ -616,7 +643,6 @@ function VoiceConsult() {
         <div className="confirmation-overlay">
           <div className="confirmation-popup">
             <div className="popup-header">
-              <span className="popup-icon">👂</span>
               <h3>I heard:</h3>
             </div>
 
