@@ -12,6 +12,10 @@ import History from './components/History'
 import VoiceConsult from './components/VoiceConsult'
 import ConsultConfig from './components/ConsultConfig'
 import { Hero } from './components/ui/helix-hero'
+import { HelixScene } from './components/ui/helix-scene'
+import { Ripple } from './components/ui/material-design-3-ripple'
+import BlurEffect from 'react-progressive-blur'
+import { Upload, Shield, Zap, MessageSquare } from 'lucide-react'
 
 type AppView = 'landing' | 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config'
 type AppState = 'upload' | 'processing' | 'results'
@@ -440,74 +444,139 @@ function App() {
   // Upload view (original functionality)
   const renderUploadView = () => (
     <>
-      {/* Error message */}
-      {error && (
-        <div className="error-message">
-          <span className="error-icon">⚠️</span>
-          {error}
-        </div>
-      )}
-
-      {/* Upload State */}
+      {/* Upload State - Full page with helix */}
       {appState === 'upload' && (
-        <div className="upload-container">
-          <div className="upload-section">
-            <div
-              className={`upload-area ${dragActive ? 'drag-active' : ''}`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-            >
-              <div className="upload-icon">📄</div>
-              <h2>Drop your medical document here</h2>
-              <p>or</p>
-              <label htmlFor="file-input" className="upload-button">
-                Choose File
-              </label>
-              <input
-                id="file-input"
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                onChange={handleFileInput}
-                style={{ display: 'none' }}
-              />
-              <p className="upload-hint">Supports PDF, PNG, JPG (max 25MB)</p>
+        <section className="relative min-h-screen w-full font-sans tracking-tight text-gray-900 bg-white overflow-hidden -mt-4">
+          {/* 3D Helix Background */}
+          <div className="absolute inset-0 z-0">
+            <HelixScene />
+          </div>
+
+          {/* Content */}
+          <div className="relative z-20 flex flex-col items-start justify-center min-h-screen px-6 md:px-12 max-w-2xl">
+            <h1 className="text-4xl md:text-5xl font-light tracking-tight mb-3 text-gray-900">
+              Upload Document
+            </h1>
+            <p className="text-gray-600 text-base md:text-lg leading-relaxed font-light tracking-tight mb-8">
+              Transform your medical records into clear, understandable insights
+            </p>
+
+            {/* Error message */}
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm w-full">
+                {error}
+              </div>
+            )}
+
+            {/* Upload Card */}
+            <div className="w-full max-w-md">
+              <Ripple
+                className="cursor-pointer rounded-2xl"
+                color="text-[#45BFD3]"
+                opacity={0.15}
+              >
+                <div
+                  className={`p-8 bg-white/80 backdrop-blur-sm border-2 border-dashed rounded-2xl transition-all duration-200 ${
+                    dragActive ? 'border-[#45BFD3] bg-[#45BFD3]/5' : 'border-gray-200 hover:border-[#45BFD3]/50'
+                  }`}
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                >
+                  <div className="flex flex-col items-center text-center">
+                    <div className="w-16 h-16 rounded-full bg-[#45BFD3]/10 flex items-center justify-center mb-4">
+                      <Upload className="w-8 h-8 text-[#45BFD3]" />
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">
+                      Drop your medical document here
+                    </h3>
+                    <p className="text-gray-500 text-sm mb-4">or</p>
+                    <label
+                      htmlFor="file-input"
+                      className="px-6 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] text-white font-medium rounded-lg transition-all duration-200 cursor-pointer"
+                    >
+                      Choose File
+                    </label>
+                    <input
+                      id="file-input"
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg"
+                      onChange={handleFileInput}
+                      style={{ display: 'none' }}
+                    />
+                    <p className="text-gray-400 text-xs mt-4">
+                      Supports PDF, PNG, JPG (max 25MB)
+                    </p>
+                  </div>
+                </div>
+              </Ripple>
+            </div>
+
+            {/* Feature highlights - minimal */}
+            <div className="flex flex-wrap gap-6 mt-8 text-sm text-gray-500">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-[#45BFD3]" />
+                <span>Secure & Private</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-[#45BFD3]" />
+                <span>Fast Processing</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-[#45BFD3]" />
+                <span>Plain English</span>
+              </div>
             </div>
           </div>
 
-          <div className="info-cards">
-            <div className="info-card">
-              <div className="info-icon">🔒</div>
-              <h3>Secure & Private</h3>
-              <p>Your medical documents are processed securely and never stored permanently</p>
-            </div>
-            <div className="info-card">
-              <div className="info-icon">⚡</div>
-              <h3>Fast Processing</h3>
-              <p>Get your summary in seconds using advanced AI technology</p>
-            </div>
-            <div className="info-card">
-              <div className="info-icon">💬</div>
-              <h3>Plain English</h3>
-              <p>Medical jargon translated into language you can understand</p>
-            </div>
-          </div>
-        </div>
+          {/* Blur effects */}
+          <BlurEffect
+            className="absolute bg-gradient-to-b from-transparent to-white/20 h-1/3 w-full bottom-0 z-10"
+            position="bottom"
+            intensity={50}
+          />
+          <BlurEffect
+            className="absolute bg-gradient-to-b from-white/20 to-transparent h-1/3 w-full top-0 z-10"
+            position="top"
+            intensity={50}
+          />
+        </section>
       )}
 
       {/* Processing State */}
       {appState === 'processing' && (
-        <div className="processing-container">
-          <div className="spinner"></div>
-          <h2>Analyzing {fileName}...</h2>
-          <p>This usually takes 10-20 seconds</p>
-          <div className="processing-steps">
-            <div className="step">✓ Reading document</div>
-            <div className="step active">⏳ Analyzing medical content</div>
-            <div className="step">◯ Generating summary</div>
+        <section className="relative min-h-screen w-full font-sans tracking-tight text-gray-900 bg-white overflow-hidden -mt-4">
+          <div className="absolute inset-0 z-0">
+            <HelixScene />
           </div>
-        </div>
+          <div className="relative z-20 flex flex-col items-center justify-center min-h-screen px-6">
+            <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-12 shadow-xl border border-gray-100 text-center max-w-md">
+              <div className="w-16 h-16 border-4 border-[#45BFD3] border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+              <h2 className="text-2xl font-light text-gray-900 mb-2">Analyzing {fileName}</h2>
+              <p className="text-gray-500 text-sm mb-6">This usually takes 10-20 seconds</p>
+              <div className="space-y-3 text-left">
+                <div className="flex items-center gap-3 text-sm">
+                  <div className="w-5 h-5 rounded-full bg-[#45BFD3] flex items-center justify-center text-white text-xs">1</div>
+                  <span className="text-gray-700">Reading document</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <div className="w-5 h-5 rounded-full bg-[#45BFD3] flex items-center justify-center text-white text-xs">2</div>
+                  <span className="text-[#45BFD3] font-medium">Analyzing medical content...</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-xs">3</div>
+                  <span className="text-gray-400">Generating summary</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <BlurEffect
+            className="absolute bg-gradient-to-b from-transparent to-white/20 h-1/3 w-full bottom-0 z-10"
+            position="bottom"
+            intensity={50}
+          />
+        </section>
       )}
 
       {/* Results State */}
@@ -526,23 +595,23 @@ function App() {
             </div>
             <div className="results-actions">
               <button onClick={handleNewUpload} className="action-button secondary">
-                📤 New Upload
+                New Upload
               </button>
               <button onClick={handlePrint} className="action-button secondary">
-                🖨️ Print
+                Print
               </button>
               <button onClick={handleDownload} className="action-button primary">
-                💾 Download
+                Download
               </button>
               <button
                 onClick={handleSaveToHistory}
                 className={`action-button ${saveStatus === 'saved' ? 'success' : 'save'}`}
                 disabled={saveStatus === 'saving' || saveStatus === 'saved'}
               >
-                {saveStatus === 'idle' && '📁 Save'}
-                {saveStatus === 'saving' && '⏳ Saving...'}
-                {saveStatus === 'saved' && '✓ Saved'}
-                {saveStatus === 'error' && '⚠️ Retry'}
+                {saveStatus === 'idle' && 'Save'}
+                {saveStatus === 'saving' && 'Saving...'}
+                {saveStatus === 'saved' && 'Saved'}
+                {saveStatus === 'error' && 'Retry'}
               </button>
 
               {/* Patient Chat Button */}
@@ -557,14 +626,14 @@ function App() {
           </div>
 
           <div className="disclaimer">
-            <strong>⚠️ Medical Disclaimer:</strong> This summary is AI-generated and for informational purposes only.
+            <strong>Medical Disclaimer:</strong> This summary is AI-generated and for informational purposes only.
             It is NOT medical advice. Always consult with your healthcare provider about your medical conditions and treatment.
           </div>
 
           {/* Patient Overview - Simple Bullet Points */}
           {patientOverview && (
             <div className="patient-overview-simple">
-              <h3>📋 Patient Overview</h3>
+              <h3>Patient Overview</h3>
               <ul className="overview-list">
                 {patientOverview.patientName && (
                   <li><strong>Patient:</strong> {patientOverview.patientName}</li>
@@ -591,7 +660,7 @@ function App() {
           {testResults.length > 0 && (
             <div className="test-results-section">
               <div className="test-results-header">
-                <h3>🔬 Your Test Results</h3>
+                <h3>Your Test Results</h3>
                 <p className="test-results-subtitle">Click any test to learn more</p>
               </div>
               <div className="test-results-grid">
@@ -605,9 +674,9 @@ function App() {
                     <div className="test-header">
                       <div className="test-name">{test.name}</div>
                       <div className={`test-status-badge ${test.status}`}>
-                        {test.status === 'normal' && '✓ Normal'}
-                        {test.status === 'borderline' && '⚠️ Borderline'}
-                        {test.status === 'abnormal' && '🔴 Abnormal'}
+                        {test.status === 'normal' && 'Normal'}
+                        {test.status === 'borderline' && 'Borderline'}
+                        {test.status === 'abnormal' && 'Abnormal'}
                       </div>
                     </div>
                     <div className="test-value">{test.value}</div>
@@ -627,7 +696,7 @@ function App() {
           {medications.length > 0 && (
             <div className="medications-section">
               <div className="medications-header">
-                <h3>💊 Your Medications</h3>
+                <h3>Your Medications</h3>
                 <p className="medications-subtitle">Click any medication to view detailed analysis</p>
               </div>
               <div className="medication-pills">
@@ -641,9 +710,9 @@ function App() {
                     <div className="pill-name">{med.name}</div>
                     <div className="pill-dosage">
                       {med.dosage && <span>{med.dosage}</span>}
-                      {med.frequency && <span> • {med.frequency}</span>}
+                      {med.frequency && <span> - {med.frequency}</span>}
                     </div>
-                    <div className="pill-tap-hint">✨ Tap to analyze</div>
+                    <div className="pill-tap-hint">Tap to analyze</div>
                   </div>
                 ))}
               </div>
@@ -653,13 +722,13 @@ function App() {
           {/* Drug Interactions Alert */}
           {interactions.length > 0 && (
             <div className="interactions-alert">
-              <h3>⚠️ Drug Interactions Found</h3>
+              <h3>Drug Interactions Found</h3>
               <div className="interactions-list">
                 {interactions.map((interaction, index) => (
                   <div key={index} className={`interaction-card ${interaction.severity}`}>
                     <div className="interaction-header">
                       <span className="interaction-drugs">
-                        {interaction.drug1} ↔ {interaction.drug2}
+                        {interaction.drug1} - {interaction.drug2}
                       </span>
                       <span className={`interaction-severity ${interaction.severity}`}>
                         {interaction.severity}
@@ -668,7 +737,7 @@ function App() {
                     <p className="interaction-description">{interaction.description}</p>
                     {interaction.recommendation && (
                       <p className="interaction-recommendation">
-                        💡 {interaction.recommendation}
+                        {interaction.recommendation}
                       </p>
                     )}
                   </div>
@@ -692,7 +761,7 @@ function App() {
             <button className="modal-close" onClick={closeMedicationModal}>×</button>
 
             <div className="modal-header">
-              <h2>💊 {selectedMedication}</h2>
+              <h2>{selectedMedication}</h2>
             </div>
 
             {loadingDetails ? (
@@ -704,7 +773,7 @@ function App() {
               <div className="modal-body">
                 {/* Drug Profile Section */}
                 <div className="detail-section">
-                  <h3>📊 Drug Profile</h3>
+                  <h3>Drug Profile</h3>
                   <div className="detail-content">
                     <p><strong>Generic Name:</strong> {medicationDetails.drug_profile.generic_name}</p>
                     {medicationDetails.drug_profile.brand_names.length > 0 && (
@@ -718,11 +787,11 @@ function App() {
 
                 {/* Dietary Recommendations */}
                 <div className="detail-section">
-                  <h3>🥗 Natural Support & Diet Tips</h3>
+                  <h3>Natural Support & Diet Tips</h3>
                   <div className="detail-content">
                     {medicationDetails.dietary_recommendations.beneficial_foods.length > 0 && (
                       <div className="diet-subsection">
-                        <h4>✓ Foods that support this medication:</h4>
+                        <h4>Foods that support this medication:</h4>
                         <ul>
                           {medicationDetails.dietary_recommendations.beneficial_foods.map((food, i) => (
                             <li key={i}>{food}</li>
@@ -732,7 +801,7 @@ function App() {
                     )}
                     {medicationDetails.dietary_recommendations.foods_to_avoid.length > 0 && (
                       <div className="diet-subsection">
-                        <h4>⚠️ Foods to avoid:</h4>
+                        <h4>Foods to avoid:</h4>
                         <ul className="warning-list">
                           {medicationDetails.dietary_recommendations.foods_to_avoid.map((food, i) => (
                             <li key={i}>{food}</li>
@@ -742,7 +811,7 @@ function App() {
                     )}
                     {medicationDetails.dietary_recommendations.nutritional_support && (
                       <p className="nutritional-tip">
-                        <strong>💡 Tip:</strong> {medicationDetails.dietary_recommendations.nutritional_support}
+                        <strong>Tip:</strong> {medicationDetails.dietary_recommendations.nutritional_support}
                       </p>
                     )}
                   </div>
@@ -751,14 +820,13 @@ function App() {
                 {/* Your Analysis */}
                 {medicationDetails.your_analysis && (
                   <div className="detail-section">
-                    <h3>⚠️ Your Medication Analysis</h3>
+                    <h3>Your Medication Analysis</h3>
                     <div className="detail-content">
                       {/* Dosage Status */}
                       <div className="analysis-item">
                         <h4>Dosage Status:</h4>
                         <div className={`dosage-badge ${medicationDetails.your_analysis.dosage_status.severity}`}>
                           {medicationDetails.your_analysis.dosage_status.dosage_provided || 'N/A'}
-                          {medicationDetails.your_analysis.dosage_status.severity === 'normal' && ' ✓'}
                         </div>
                         <p>{medicationDetails.your_analysis.dosage_status.issue}</p>
                         {medicationDetails.your_analysis.dosage_status.expected_range && (
@@ -771,16 +839,16 @@ function App() {
                       {/* Interactions */}
                       {medicationDetails.your_analysis.interactions.length > 0 && (
                         <div className="analysis-item">
-                          <h4>⚠️ Interactions Found: {medicationDetails.your_analysis.interactions.length}</h4>
+                          <h4>Interactions Found: {medicationDetails.your_analysis.interactions.length}</h4>
                           {medicationDetails.your_analysis.interactions.map((interaction, i) => (
                             <div key={i} className={`interaction-card ${interaction.severity}`}>
                               <div className="interaction-badge">{interaction.severity.toUpperCase()}</div>
                               <p className="interaction-drugs">
-                                {interaction.drug1} ↔️ {interaction.drug2}
+                                {interaction.drug1} - {interaction.drug2}
                               </p>
                               <p className="interaction-description">{interaction.description}</p>
                               <p className="interaction-recommendation">
-                                💡 {interaction.recommendation}
+                                {interaction.recommendation}
                               </p>
                             </div>
                           ))}
@@ -789,7 +857,7 @@ function App() {
 
                       {medicationDetails.your_analysis.interactions.length === 0 && (
                         <div className="no-interactions">
-                          <p>✓ No interactions found with your other medications</p>
+                          <p>No interactions found with your other medications</p>
                         </div>
                       )}
                     </div>
@@ -799,7 +867,7 @@ function App() {
                 {/* Side Effects */}
                 {medicationDetails.common_side_effects.length > 0 && (
                   <div className="detail-section">
-                    <h3>💫 Common Side Effects</h3>
+                    <h3>Common Side Effects</h3>
                     <div className="detail-content">
                       <ul className="side-effects-list">
                         {medicationDetails.common_side_effects.map((effect, i) => (
@@ -814,7 +882,7 @@ function App() {
 
                 {/* How It Works */}
                 <div className="detail-section">
-                  <h3>🔬 How It Works</h3>
+                  <h3>How It Works</h3>
                   <div className="detail-content">
                     <p>{medicationDetails.how_it_works}</p>
                   </div>
@@ -836,33 +904,33 @@ function App() {
             <button className="modal-close" onClick={() => setSelectedTest(null)}>×</button>
 
             <div className="modal-header">
-              <h2>🔬 {selectedTest.name}</h2>
+              <h2>{selectedTest.name}</h2>
             </div>
 
             <div className="modal-body">
               <div className="detail-section">
-                <h3>📊 Your Result</h3>
+                <h3>Your Result</h3>
                 <div className="detail-content">
                   <div className={`test-result-display ${selectedTest.status}`}>
                     <div className="result-value">{selectedTest.value}</div>
                     <div className={`result-status ${selectedTest.status}`}>
-                      {selectedTest.status === 'normal' && '✓ Within Normal Range'}
-                      {selectedTest.status === 'borderline' && '⚠️ Borderline - May Need Attention'}
-                      {selectedTest.status === 'abnormal' && '🔴 Outside Normal Range'}
+                      {selectedTest.status === 'normal' && 'Within Normal Range'}
+                      {selectedTest.status === 'borderline' && 'Borderline - May Need Attention'}
+                      {selectedTest.status === 'abnormal' && 'Outside Normal Range'}
                     </div>
                   </div>
                 </div>
               </div>
 
               <div className="detail-section">
-                <h3>📖 What This Test Measures</h3>
+                <h3>What This Test Measures</h3>
                 <div className="detail-content">
                   <p>{selectedTest.explanation || 'This test provides important information about your health.'}</p>
                 </div>
               </div>
 
               <div className="detail-section">
-                <h3>💡 What You Can Do</h3>
+                <h3>What You Can Do</h3>
                 <div className="detail-content">
                   {selectedTest.status === 'normal' && (
                     <div className="recommendation-box success">
@@ -906,10 +974,10 @@ function App() {
     <div className="app">
       <Navigation currentView={currentView} onNavigate={handleNavigate} />
 
-      <div className="container">
-        {currentView === 'upload' && (
+      <div className={currentView === 'upload' && appState === 'upload' ? '' : 'container'}>
+        {currentView === 'upload' && appState === 'results' && (
           <header className="header">
-            <h1>🏥 MedEase</h1>
+            <h1>MedEase</h1>
             <p className="subtitle">Transform complex medical records into clear, understandable summaries</p>
           </header>
         )}
