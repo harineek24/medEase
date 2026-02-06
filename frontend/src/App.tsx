@@ -11,8 +11,9 @@ import Dashboard from './components/Dashboard'
 import History from './components/History'
 import VoiceConsult from './components/VoiceConsult'
 import ConsultConfig from './components/ConsultConfig'
+import { Hero } from './components/ui/helix-hero'
 
-type AppView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config'
+type AppView = 'landing' | 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config'
 type AppState = 'upload' | 'processing' | 'results'
 
 interface SummaryData {
@@ -77,8 +78,8 @@ interface DrugInteraction {
 }
 
 function App() {
-  // View state
-  const [currentView, setCurrentView] = useState<AppView>('upload')
+  // View state - start with landing page
+  const [currentView, setCurrentView] = useState<AppView>('landing')
 
   // Upload flow state
   const [appState, setAppState] = useState<AppState>('upload')
@@ -889,6 +890,17 @@ function App() {
       )}
     </>
   )
+
+  // Show landing page hero
+  if (currentView === 'landing') {
+    return (
+      <Hero
+        title="MedEase"
+        description="Transform complex medical records into clear, actionable insights. Powered by AI to help you understand your health better."
+        onGetStarted={() => setCurrentView('upload')}
+      />
+    )
+  }
 
   return (
     <div className="app">
