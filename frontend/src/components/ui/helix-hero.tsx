@@ -35,7 +35,7 @@ const HelixRings: React.FC<HelixRingsProps> = ({
 
   return (
     <group
-      position={[3, 0, 0]}
+      position={[6, 0, 0]}
       ref={groupRef}
       rotation={[0.3, 0, 0.1]}
     >
