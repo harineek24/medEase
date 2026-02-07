@@ -294,6 +294,136 @@ def init_database():
             )
         """)
 
+        # Vitals table - stores patient vital signs
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS vitals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                recorded_by INTEGER,
+                heart_rate REAL,
+                systolic_bp REAL,
+                diastolic_bp REAL,
+                oxygen_level REAL,
+                temperature REAL,
+                respiratory_rate REAL,
+                weight REAL,
+                notes TEXT,
+                recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (recorded_by) REFERENCES doctors(id)
+            )
+        """)
+
+        # Doctor notes table - text + voice notes from doctor to patient
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS doctor_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doctor_id INTEGER NOT NULL,
+                patient_id INTEGER NOT NULL,
+                note_type TEXT DEFAULT 'text',
+                content TEXT,
+                audio_url TEXT,
+                is_read INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (doctor_id) REFERENCES doctors(id),
+                FOREIGN KEY (patient_id) REFERENCES patients(id)
+            )
+        """)
+
+        # Journal entries table - patient daily journal entries
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS journal_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                entry_text TEXT,
+                mood TEXT,
+                pain_level INTEGER,
+                symptoms TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id)
+            )
+        """)
+
+        # Billing table - patient billing and credit balances
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS billing (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                appointment_id INTEGER,
+                description TEXT NOT NULL,
+                amount REAL NOT NULL,
+                insurance_covered REAL DEFAULT 0,
+                patient_responsibility REAL DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                payment_date TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (appointment_id) REFERENCES appointments(id)
+            )
+        """)
+
+        # Insurance table - patient insurance info
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS insurance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                provider_name TEXT NOT NULL,
+                policy_number TEXT,
+                group_number TEXT,
+                subscriber_name TEXT,
+                effective_date TEXT,
+                expiration_date TEXT,
+                copay REAL,
+                deductible REAL,
+                deductible_met REAL DEFAULT 0,
+                is_primary INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id)
+            )
+        """)
+
+        # Prescriptions table - e-prescribing
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS prescriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                doctor_id INTEGER NOT NULL,
+                medication_name TEXT NOT NULL,
+                dosage TEXT,
+                frequency TEXT,
+                quantity INTEGER,
+                refills INTEGER DEFAULT 0,
+                instructions TEXT,
+                status TEXT DEFAULT 'active',
+                prescribed_date TEXT DEFAULT CURRENT_TIMESTAMP,
+                expiry_date TEXT,
+                pharmacy TEXT,
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (doctor_id) REFERENCES doctors(id)
+            )
+        """)
+
+        # Lab results table - labs and radiology
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS lab_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                ordered_by INTEGER,
+                lab_type TEXT NOT NULL,
+                test_name TEXT NOT NULL,
+                result_value TEXT,
+                unit TEXT,
+                reference_range TEXT,
+                status TEXT DEFAULT 'pending',
+                is_abnormal INTEGER DEFAULT 0,
+                notes TEXT,
+                ordered_date TEXT DEFAULT CURRENT_TIMESTAMP,
+                result_date TEXT,
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (ordered_by) REFERENCES doctors(id)
+            )
+        """)
+
         print("Database initialized successfully!")
 
         # Seed sample data if tables are empty
@@ -579,6 +709,410 @@ def _seed_sample_data(cursor):
         INSERT INTO admin_users (username, password_hash, email, role)
         VALUES (?, ?, ?, ?)
     """, ("admin", password_hash, "admin@medease.com", "superadmin"))
+
+    # =========================================================================
+    # Sample Patients
+    # =========================================================================
+    patients = [
+        {"name": "Maria Garcia", "date_of_birth": "1985-03-14"},
+        {"name": "James Wilson", "date_of_birth": "1972-07-22"},
+        {"name": "Aisha Patel", "date_of_birth": "1990-11-05"},
+        {"name": "Robert Chang", "date_of_birth": "1968-01-30"},
+        {"name": "Emily Thompson", "date_of_birth": "1995-06-18"},
+        {"name": "Carlos Mendez", "date_of_birth": "1980-09-12"},
+        {"name": "Sarah Kim", "date_of_birth": "1988-12-25"},
+        {"name": "David O'Brien", "date_of_birth": "1975-04-07"},
+        {"name": "Priya Sharma", "date_of_birth": "1992-08-19"},
+        {"name": "Michael Johnson", "date_of_birth": "1965-02-28"},
+    ]
+
+    for pt in patients:
+        cursor.execute(
+            "INSERT INTO patients (name, date_of_birth) VALUES (?, ?)",
+            (pt["name"], pt["date_of_birth"])
+        )
+
+    # patient IDs will be 1-10 (first patients in DB)
+
+    # =========================================================================
+    # Sample Appointments (mix of scheduled, completed, no_show across dates)
+    # =========================================================================
+    from datetime import date, timedelta
+    today = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    two_days_ago = (date.today() - timedelta(days=2)).isoformat()
+    last_week = (date.today() - timedelta(days=7)).isoformat()
+    two_weeks_ago = (date.today() - timedelta(days=14)).isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    next_week = (date.today() + timedelta(days=7)).isoformat()
+    in_two_weeks = (date.today() + timedelta(days=14)).isoformat()
+
+    appointments = [
+        # Doctor 1 (Sarah Chen, clinic 1) - patients 1,2,3,4
+        {"patient_id": 1, "doctor_id": 1, "clinic_id": 1, "service_id": 1, "date": two_weeks_ago, "time": "09:00", "status": "completed", "notes": "Annual physical - all looks good"},
+        {"patient_id": 1, "doctor_id": 1, "clinic_id": 1, "service_id": 3, "date": today, "time": "10:30", "status": "scheduled", "notes": "Follow-up on blood pressure"},
+        {"patient_id": 2, "doctor_id": 1, "clinic_id": 1, "service_id": 2, "date": last_week, "time": "11:00", "status": "completed", "notes": "Sick visit - flu symptoms"},
+        {"patient_id": 2, "doctor_id": 1, "clinic_id": 1, "service_id": 3, "date": tomorrow, "time": "14:00", "status": "scheduled", "notes": "Chronic disease follow-up"},
+        {"patient_id": 3, "doctor_id": 1, "clinic_id": 1, "service_id": 1, "date": yesterday, "time": "09:30", "status": "completed", "notes": "Annual exam"},
+        {"patient_id": 4, "doctor_id": 1, "clinic_id": 1, "service_id": 2, "date": two_days_ago, "time": "15:00", "status": "no_show", "notes": "Patient did not show"},
+
+        # Doctor 2 (Michael Rodriguez, clinic 1) - patients 3,5,6
+        {"patient_id": 3, "doctor_id": 2, "clinic_id": 1, "service_id": 4, "date": last_week, "time": "10:00", "status": "completed", "notes": "Flu vaccination"},
+        {"patient_id": 5, "doctor_id": 2, "clinic_id": 1, "service_id": 2, "date": today, "time": "09:00", "status": "scheduled", "notes": "Knee pain evaluation"},
+        {"patient_id": 6, "doctor_id": 2, "clinic_id": 1, "service_id": 1, "date": next_week, "time": "11:00", "status": "scheduled", "notes": "Annual physical exam"},
+
+        # Doctor 3 (Jennifer Patel, clinic 2) - patients 5,7,9
+        {"patient_id": 5, "doctor_id": 3, "clinic_id": 2, "service_id": 7, "date": two_weeks_ago, "time": "14:00", "status": "completed", "notes": "Wellness exam"},
+        {"patient_id": 7, "doctor_id": 3, "clinic_id": 2, "service_id": 5, "date": last_week, "time": "10:00", "status": "completed", "notes": "New patient visit"},
+        {"patient_id": 7, "doctor_id": 3, "clinic_id": 2, "service_id": 6, "date": today, "time": "11:00", "status": "scheduled", "notes": "Follow-up visit"},
+        {"patient_id": 9, "doctor_id": 3, "clinic_id": 2, "service_id": 5, "date": yesterday, "time": "13:30", "status": "completed", "notes": "New patient intake"},
+
+        # Doctor 4 (David Kim, clinic 2) - patients 6,8,10
+        {"patient_id": 6, "doctor_id": 4, "clinic_id": 2, "service_id": 8, "date": two_weeks_ago, "time": "09:00", "status": "completed", "notes": "Diabetes management review"},
+        {"patient_id": 8, "doctor_id": 4, "clinic_id": 2, "service_id": 8, "date": last_week, "time": "10:30", "status": "no_show", "notes": "Missed diabetes follow-up"},
+        {"patient_id": 8, "doctor_id": 4, "clinic_id": 2, "service_id": 8, "date": today, "time": "14:30", "status": "scheduled", "notes": "Rescheduled diabetes follow-up"},
+        {"patient_id": 10, "doctor_id": 4, "clinic_id": 2, "service_id": 6, "date": yesterday, "time": "15:00", "status": "completed", "notes": "Follow-up for metabolic panel"},
+        {"patient_id": 10, "doctor_id": 4, "clinic_id": 2, "service_id": 8, "date": in_two_weeks, "time": "09:00", "status": "scheduled", "notes": "Quarterly diabetes check"},
+
+        # Doctor 9 (Elizabeth O'Connor, clinic 5) - patients 2,4,10
+        {"patient_id": 2, "doctor_id": 9, "clinic_id": 5, "service_id": 18, "date": two_weeks_ago, "time": "10:00", "status": "completed", "notes": "Cardiovascular risk assessment"},
+        {"patient_id": 4, "doctor_id": 9, "clinic_id": 5, "service_id": 17, "date": last_week, "time": "09:00", "status": "completed", "notes": "Executive health exam"},
+        {"patient_id": 10, "doctor_id": 9, "clinic_id": 5, "service_id": 20, "date": today, "time": "16:00", "status": "scheduled", "notes": "Medication review"},
+    ]
+
+    for apt in appointments:
+        cursor.execute("""
+            INSERT INTO appointments (patient_id, doctor_id, clinic_id, service_id,
+                                     appointment_date, appointment_time, duration_minutes, status, notes)
+            VALUES (?, ?, ?, ?, ?, ?, 30, ?, ?)
+        """, (apt["patient_id"], apt["doctor_id"], apt["clinic_id"], apt["service_id"],
+              apt["date"], apt["time"], apt["status"], apt["notes"]))
+
+    # =========================================================================
+    # Sample Vitals
+    # =========================================================================
+    vitals = [
+        # Maria Garcia
+        {"patient_id": 1, "recorded_by": 1, "heart_rate": 72, "systolic_bp": 138, "diastolic_bp": 88,
+         "oxygen_level": 98.2, "temperature": 98.6, "respiratory_rate": 16, "weight": 145, "notes": "Slightly elevated BP"},
+        {"patient_id": 1, "recorded_by": 1, "heart_rate": 70, "systolic_bp": 130, "diastolic_bp": 82,
+         "oxygen_level": 98.5, "temperature": 98.4, "respiratory_rate": 15, "weight": 144, "notes": "BP improving"},
+        # James Wilson
+        {"patient_id": 2, "recorded_by": 1, "heart_rate": 88, "systolic_bp": 145, "diastolic_bp": 92,
+         "oxygen_level": 97.0, "temperature": 100.2, "respiratory_rate": 20, "weight": 210, "notes": "Fever present, tachycardic"},
+        {"patient_id": 2, "recorded_by": 9, "heart_rate": 78, "systolic_bp": 142, "diastolic_bp": 90,
+         "oxygen_level": 97.8, "temperature": 98.7, "respiratory_rate": 17, "weight": 208, "notes": "Recovering from flu"},
+        # Aisha Patel
+        {"patient_id": 3, "recorded_by": 1, "heart_rate": 68, "systolic_bp": 118, "diastolic_bp": 76,
+         "oxygen_level": 99.0, "temperature": 98.4, "respiratory_rate": 14, "weight": 130, "notes": "All vitals normal"},
+        # Robert Chang
+        {"patient_id": 4, "recorded_by": 9, "heart_rate": 82, "systolic_bp": 152, "diastolic_bp": 96,
+         "oxygen_level": 96.5, "temperature": 98.6, "respiratory_rate": 18, "weight": 195, "notes": "HTN noted, needs monitoring"},
+        # Carlos Mendez
+        {"patient_id": 6, "recorded_by": 4, "heart_rate": 76, "systolic_bp": 128, "diastolic_bp": 80,
+         "oxygen_level": 98.0, "temperature": 98.5, "respiratory_rate": 16, "weight": 180, "notes": "Stable vitals"},
+        # David O'Brien
+        {"patient_id": 8, "recorded_by": 4, "heart_rate": 90, "systolic_bp": 150, "diastolic_bp": 95,
+         "oxygen_level": 97.2, "temperature": 98.8, "respiratory_rate": 18, "weight": 225, "notes": "Elevated BP, overweight"},
+        # Michael Johnson
+        {"patient_id": 10, "recorded_by": 4, "heart_rate": 74, "systolic_bp": 134, "diastolic_bp": 86,
+         "oxygen_level": 97.5, "temperature": 98.6, "respiratory_rate": 16, "weight": 190, "notes": "Borderline hypertension"},
+    ]
+
+    for v in vitals:
+        cursor.execute("""
+            INSERT INTO vitals (patient_id, recorded_by, heart_rate, systolic_bp, diastolic_bp,
+                               oxygen_level, temperature, respiratory_rate, weight, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (v["patient_id"], v["recorded_by"], v["heart_rate"], v["systolic_bp"], v["diastolic_bp"],
+              v["oxygen_level"], v["temperature"], v["respiratory_rate"], v["weight"], v["notes"]))
+
+    # =========================================================================
+    # Sample Doctor Notes
+    # =========================================================================
+    doctor_notes = [
+        {"doctor_id": 1, "patient_id": 1, "note_type": "text",
+         "content": "Maria, your blood pressure has been trending down nicely. Keep up with the low-sodium diet and daily walks. Let's recheck at your next visit."},
+        {"doctor_id": 1, "patient_id": 1, "note_type": "text",
+         "content": "Adjusted lisinopril dosage from 10mg to 20mg. Please monitor for any dizziness and report back."},
+        {"doctor_id": 1, "patient_id": 2, "note_type": "text",
+         "content": "James, your flu test came back positive for Influenza A. Rest, fluids, and the prescribed Tamiflu should have you feeling better in 3-5 days. Call if fever persists beyond 3 days."},
+        {"doctor_id": 1, "patient_id": 3, "note_type": "text",
+         "content": "Aisha, all your lab results look excellent. Your cholesterol is well controlled. Continue current medication regimen. See you in 6 months."},
+        {"doctor_id": 9, "patient_id": 4, "note_type": "text",
+         "content": "Robert, your cardiovascular risk assessment shows moderate risk. I am recommending lifestyle modifications and starting a low-dose statin. Please review the attached diet plan."},
+        {"doctor_id": 4, "patient_id": 6, "note_type": "text",
+         "content": "Carlos, your A1C has come down to 6.8 from 7.4. Great improvement! Keep up with the metformin and dietary changes."},
+        {"doctor_id": 3, "patient_id": 7, "note_type": "text",
+         "content": "Sarah, welcome to our practice. Based on your intake, I would like to run a comprehensive panel. Please schedule your blood draw at your convenience."},
+        {"doctor_id": 4, "patient_id": 8, "note_type": "text",
+         "content": "David, I noticed you missed your last appointment. It is important we stay on track with your diabetes management. Please reschedule as soon as possible."},
+        {"doctor_id": 4, "patient_id": 10, "note_type": "text",
+         "content": "Michael, your metabolic panel shows improved kidney function. We will continue monitoring quarterly. Keep staying hydrated."},
+    ]
+
+    for note in doctor_notes:
+        cursor.execute("""
+            INSERT INTO doctor_notes (doctor_id, patient_id, note_type, content)
+            VALUES (?, ?, ?, ?)
+        """, (note["doctor_id"], note["patient_id"], note["note_type"], note["content"]))
+
+    # =========================================================================
+    # Sample Journal Entries (include several for today so stories show up)
+    # =========================================================================
+    now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    yesterday_ts = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    two_days_ago_ts = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+    three_days_ago_ts = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+
+    journal_entries = [
+        # TODAY entries - these will show up as stories
+        {"patient_id": 1, "entry_text": "Feeling much better today. Took my blood pressure this morning and it was 128/82. The new medication seems to be working. Went for a 30-minute walk.",
+         "mood": "good", "pain_level": 1, "symptoms": "mild headache", "created_at": now_ts},
+        {"patient_id": 2, "entry_text": "Still recovering from the flu but my fever broke last night. Appetite is slowly coming back. Took all my medications on time today.",
+         "mood": "okay", "pain_level": 3, "symptoms": "body aches, fatigue, mild cough", "created_at": now_ts},
+        {"patient_id": 3, "entry_text": "Great day! Went for a run this morning and felt strong. No complaints at all. Excited about my clean lab results.",
+         "mood": "great", "pain_level": 0, "symptoms": None, "created_at": now_ts},
+        {"patient_id": 5, "entry_text": "Knee is still bothering me especially going up stairs. Icing it twice a day as recommended. Pain is about a 5 out of 10.",
+         "mood": "okay", "pain_level": 5, "symptoms": "knee pain, stiffness in morning", "created_at": now_ts},
+        {"patient_id": 6, "entry_text": "Checked my blood sugar after breakfast - 112. Sticking to the low carb meal plan. Feeling more energetic this week.",
+         "mood": "good", "pain_level": 0, "symptoms": None, "created_at": now_ts},
+        {"patient_id": 7, "entry_text": "First day journaling here! Had my new patient visit last week and Dr. Patel was wonderful. Waiting for my lab results. A little anxious about it.",
+         "mood": "anxious", "pain_level": 0, "symptoms": "anxiety, trouble sleeping", "created_at": now_ts},
+        {"patient_id": 8, "entry_text": "Missed my appointment again last week. I know I need to do better. Blood sugar has been running high - 180s after meals. Going to the rescheduled visit tomorrow.",
+         "mood": "stressed", "pain_level": 2, "symptoms": "frequent urination, thirst", "created_at": now_ts},
+        {"patient_id": 9, "entry_text": "Settling into the new practice. Had my intake yesterday and everything went smoothly. Taking my prenatal vitamins regularly.",
+         "mood": "good", "pain_level": 0, "symptoms": "mild nausea in mornings", "created_at": now_ts},
+        {"patient_id": 10, "entry_text": "Kidney numbers looking better per Dr. Kim. Drinking 8 glasses of water daily now. Feeling less fatigued than last month.",
+         "mood": "good", "pain_level": 1, "symptoms": "mild fatigue", "created_at": now_ts},
+
+        # PAST entries for history
+        {"patient_id": 1, "entry_text": "Had a dizzy spell this morning after taking my new BP medication. Ate breakfast and it went away. Will mention to Dr. Chen.",
+         "mood": "concerned", "pain_level": 2, "symptoms": "dizziness, lightheadedness", "created_at": yesterday_ts},
+        {"patient_id": 1, "entry_text": "Blood pressure was 140/90 today. A bit frustrated that it is not coming down faster. Trying to reduce salt intake.",
+         "mood": "frustrated", "pain_level": 1, "symptoms": "headache", "created_at": three_days_ago_ts},
+        {"patient_id": 2, "entry_text": "Fever hit 102 today. Whole body aches. Started Tamiflu as prescribed. Wife is making chicken soup.",
+         "mood": "terrible", "pain_level": 7, "symptoms": "high fever, body aches, chills, sore throat", "created_at": yesterday_ts},
+        {"patient_id": 5, "entry_text": "Knee swelled up after trying to jog. Need to stick to low-impact exercise for now. Using the brace Dr. Rodriguez recommended.",
+         "mood": "frustrated", "pain_level": 6, "symptoms": "knee swelling, pain with movement", "created_at": two_days_ago_ts},
+        {"patient_id": 6, "entry_text": "A1C results came in - 6.8! Down from 7.4! The diet changes are really paying off. Celebrated with a sugar-free dessert.",
+         "mood": "excited", "pain_level": 0, "symptoms": None, "created_at": yesterday_ts},
+        {"patient_id": 8, "entry_text": "Blood sugar was 210 after dinner. I know I had too many carbs. Need to plan meals better.",
+         "mood": "guilty", "pain_level": 0, "symptoms": "blurred vision, thirst", "created_at": two_days_ago_ts},
+    ]
+
+    for je in journal_entries:
+        cursor.execute("""
+            INSERT INTO journal_entries (patient_id, entry_text, mood, pain_level, symptoms, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (je["patient_id"], je["entry_text"], je["mood"], je["pain_level"], je["symptoms"], je["created_at"]))
+
+    # =========================================================================
+    # Sample Billing Records
+    # =========================================================================
+    billing_records = [
+        {"patient_id": 1, "appointment_id": 1, "description": "Annual Physical Exam", "amount": 150.00,
+         "insurance_covered": 120.00, "patient_responsibility": 30.00, "status": "paid"},
+        {"patient_id": 1, "appointment_id": 2, "description": "Follow-up Visit - Hypertension", "amount": 125.00,
+         "insurance_covered": 100.00, "patient_responsibility": 25.00, "status": "pending"},
+        {"patient_id": 2, "appointment_id": 3, "description": "Sick Visit - Influenza", "amount": 100.00,
+         "insurance_covered": 80.00, "patient_responsibility": 20.00, "status": "paid"},
+        {"patient_id": 3, "appointment_id": 5, "description": "Annual Physical Exam", "amount": 150.00,
+         "insurance_covered": 150.00, "patient_responsibility": 0.00, "status": "paid"},
+        {"patient_id": 3, "appointment_id": 7, "description": "Flu Vaccination", "amount": 50.00,
+         "insurance_covered": 50.00, "patient_responsibility": 0.00, "status": "paid"},
+        {"patient_id": 4, "appointment_id": 20, "description": "Executive Health Exam", "amount": 500.00,
+         "insurance_covered": 350.00, "patient_responsibility": 150.00, "status": "pending"},
+        {"patient_id": 5, "appointment_id": 10, "description": "Women's Wellness Exam", "amount": 175.00,
+         "insurance_covered": 140.00, "patient_responsibility": 35.00, "status": "paid"},
+        {"patient_id": 6, "appointment_id": 14, "description": "Diabetes Care Visit", "amount": 125.00,
+         "insurance_covered": 100.00, "patient_responsibility": 25.00, "status": "paid"},
+        {"patient_id": 7, "appointment_id": 11, "description": "New Patient Visit", "amount": 200.00,
+         "insurance_covered": 160.00, "patient_responsibility": 40.00, "status": "pending"},
+        {"patient_id": 8, "appointment_id": 16, "description": "Diabetes Care Visit", "amount": 125.00,
+         "insurance_covered": 0.00, "patient_responsibility": 125.00, "status": "pending"},
+        {"patient_id": 9, "appointment_id": 13, "description": "New Patient Visit", "amount": 200.00,
+         "insurance_covered": 170.00, "patient_responsibility": 30.00, "status": "paid"},
+        {"patient_id": 10, "appointment_id": 17, "description": "Follow-up Visit - Metabolic", "amount": 100.00,
+         "insurance_covered": 80.00, "patient_responsibility": 20.00, "status": "paid"},
+        {"patient_id": 2, "appointment_id": 19, "description": "Cardiovascular Risk Assessment", "amount": 225.00,
+         "insurance_covered": 180.00, "patient_responsibility": 45.00, "status": "pending"},
+    ]
+
+    for bill in billing_records:
+        cursor.execute("""
+            INSERT INTO billing (patient_id, appointment_id, description, amount,
+                                insurance_covered, patient_responsibility, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (bill["patient_id"], bill["appointment_id"], bill["description"], bill["amount"],
+              bill["insurance_covered"], bill["patient_responsibility"], bill["status"]))
+
+    # =========================================================================
+    # Sample Insurance
+    # =========================================================================
+    insurance_records = [
+        {"patient_id": 1, "provider_name": "Blue Shield of California", "policy_number": "BSC-2024-88901",
+         "group_number": "GRP-4412", "copay": 30.00, "deductible": 1500.00},
+        {"patient_id": 2, "provider_name": "Aetna", "policy_number": "AET-2024-55234",
+         "group_number": "GRP-7788", "copay": 25.00, "deductible": 2000.00},
+        {"patient_id": 3, "provider_name": "Kaiser Permanente", "policy_number": "KP-2024-11567",
+         "group_number": "GRP-2200", "copay": 20.00, "deductible": 500.00},
+        {"patient_id": 5, "provider_name": "UnitedHealthcare", "policy_number": "UHC-2024-33890",
+         "group_number": "GRP-5500", "copay": 35.00, "deductible": 2500.00},
+        {"patient_id": 6, "provider_name": "Cigna", "policy_number": "CIG-2024-77123",
+         "group_number": "GRP-9100", "copay": 25.00, "deductible": 1000.00},
+        {"patient_id": 7, "provider_name": "Blue Shield of California", "policy_number": "BSC-2024-44567",
+         "group_number": "GRP-4412", "copay": 30.00, "deductible": 1500.00},
+        {"patient_id": 9, "provider_name": "Anthem Blue Cross", "policy_number": "ABC-2024-66789",
+         "group_number": "GRP-3300", "copay": 20.00, "deductible": 750.00},
+        {"patient_id": 10, "provider_name": "Aetna", "policy_number": "AET-2024-99012",
+         "group_number": "GRP-7788", "copay": 25.00, "deductible": 2000.00},
+    ]
+
+    for ins in insurance_records:
+        cursor.execute("""
+            INSERT INTO insurance (patient_id, provider_name, policy_number, group_number, copay, deductible)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (ins["patient_id"], ins["provider_name"], ins["policy_number"],
+              ins["group_number"], ins["copay"], ins["deductible"]))
+
+    # =========================================================================
+    # Sample Prescriptions
+    # =========================================================================
+    prescriptions = [
+        {"patient_id": 1, "doctor_id": 1, "medication_name": "Lisinopril", "dosage": "20mg",
+         "frequency": "Once daily", "quantity": 30, "refills": 5,
+         "instructions": "Take one tablet by mouth every morning. Monitor blood pressure daily.",
+         "pharmacy": "CVS Pharmacy - Santa Clara"},
+        {"patient_id": 1, "doctor_id": 1, "medication_name": "Amlodipine", "dosage": "5mg",
+         "frequency": "Once daily", "quantity": 30, "refills": 5,
+         "instructions": "Take one tablet by mouth in the evening.",
+         "pharmacy": "CVS Pharmacy - Santa Clara"},
+        {"patient_id": 2, "doctor_id": 1, "medication_name": "Oseltamivir (Tamiflu)", "dosage": "75mg",
+         "frequency": "Twice daily", "quantity": 10, "refills": 0,
+         "instructions": "Take one capsule twice daily for 5 days. Complete full course.",
+         "pharmacy": "Walgreens - San Jose"},
+        {"patient_id": 2, "doctor_id": 9, "medication_name": "Atorvastatin", "dosage": "20mg",
+         "frequency": "Once daily at bedtime", "quantity": 30, "refills": 11,
+         "instructions": "Take one tablet at bedtime. Avoid grapefruit juice.",
+         "pharmacy": "Walgreens - San Jose"},
+        {"patient_id": 4, "doctor_id": 9, "medication_name": "Rosuvastatin", "dosage": "10mg",
+         "frequency": "Once daily", "quantity": 30, "refills": 5,
+         "instructions": "Take one tablet daily. May take with or without food.",
+         "pharmacy": "Rite Aid - San Francisco"},
+        {"patient_id": 4, "doctor_id": 9, "medication_name": "Aspirin", "dosage": "81mg",
+         "frequency": "Once daily", "quantity": 90, "refills": 3,
+         "instructions": "Take one low-dose aspirin daily with food.",
+         "pharmacy": "Rite Aid - San Francisco"},
+        {"patient_id": 6, "doctor_id": 4, "medication_name": "Metformin", "dosage": "1000mg",
+         "frequency": "Twice daily", "quantity": 60, "refills": 5,
+         "instructions": "Take one tablet with breakfast and one with dinner. Take with food to reduce stomach upset.",
+         "pharmacy": "CVS Pharmacy - San Jose"},
+        {"patient_id": 8, "doctor_id": 4, "medication_name": "Metformin", "dosage": "500mg",
+         "frequency": "Twice daily", "quantity": 60, "refills": 5,
+         "instructions": "Take one tablet with breakfast and one with dinner.",
+         "pharmacy": "Walgreens - San Jose"},
+        {"patient_id": 8, "doctor_id": 4, "medication_name": "Glipizide", "dosage": "5mg",
+         "frequency": "Once daily before breakfast", "quantity": 30, "refills": 5,
+         "instructions": "Take 30 minutes before breakfast. Watch for signs of low blood sugar.",
+         "pharmacy": "Walgreens - San Jose"},
+        {"patient_id": 10, "doctor_id": 4, "medication_name": "Lisinopril", "dosage": "10mg",
+         "frequency": "Once daily", "quantity": 30, "refills": 5,
+         "instructions": "Take one tablet daily. Stay hydrated. Report any swelling.",
+         "pharmacy": "CVS Pharmacy - San Jose"},
+    ]
+
+    for rx in prescriptions:
+        cursor.execute("""
+            INSERT INTO prescriptions (patient_id, doctor_id, medication_name, dosage, frequency,
+                                       quantity, refills, instructions, pharmacy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (rx["patient_id"], rx["doctor_id"], rx["medication_name"], rx["dosage"], rx["frequency"],
+              rx["quantity"], rx["refills"], rx["instructions"], rx["pharmacy"]))
+
+    # =========================================================================
+    # Sample Lab Results
+    # =========================================================================
+    lab_results = [
+        # Maria Garcia - blood work
+        {"patient_id": 1, "ordered_by": 1, "lab_type": "Blood", "test_name": "Complete Blood Count (CBC)",
+         "result_value": "Normal", "unit": None, "reference_range": "See components", "is_abnormal": 0,
+         "notes": "All CBC components within normal limits", "status": "completed"},
+        {"patient_id": 1, "ordered_by": 1, "lab_type": "Blood", "test_name": "Basic Metabolic Panel",
+         "result_value": "Normal", "unit": None, "reference_range": "See components", "is_abnormal": 0,
+         "notes": "Electrolytes and kidney function normal", "status": "completed"},
+        {"patient_id": 1, "ordered_by": 1, "lab_type": "Blood", "test_name": "HbA1c",
+         "result_value": "5.6", "unit": "%", "reference_range": "< 5.7", "is_abnormal": 0,
+         "notes": "Normal - not diabetic", "status": "completed"},
+
+        # James Wilson
+        {"patient_id": 2, "ordered_by": 1, "lab_type": "Blood", "test_name": "Influenza A/B Rapid Test",
+         "result_value": "Positive - Influenza A", "unit": None, "reference_range": "Negative", "is_abnormal": 1,
+         "notes": "Positive for Influenza A. Started antiviral treatment.", "status": "completed"},
+        {"patient_id": 2, "ordered_by": 9, "lab_type": "Blood", "test_name": "Lipid Panel",
+         "result_value": "Total: 242", "unit": "mg/dL", "reference_range": "< 200", "is_abnormal": 1,
+         "notes": "Elevated total cholesterol. LDL 155, HDL 42, Triglycerides 225", "status": "completed"},
+
+        # Aisha Patel
+        {"patient_id": 3, "ordered_by": 1, "lab_type": "Blood", "test_name": "Lipid Panel",
+         "result_value": "Total: 185", "unit": "mg/dL", "reference_range": "< 200", "is_abnormal": 0,
+         "notes": "Excellent lipid profile. LDL 98, HDL 65, Triglycerides 110", "status": "completed"},
+        {"patient_id": 3, "ordered_by": 1, "lab_type": "Blood", "test_name": "Thyroid Panel (TSH)",
+         "result_value": "2.1", "unit": "mIU/L", "reference_range": "0.4 - 4.0", "is_abnormal": 0,
+         "notes": "Thyroid function normal", "status": "completed"},
+
+        # Robert Chang
+        {"patient_id": 4, "ordered_by": 9, "lab_type": "Blood", "test_name": "Lipid Panel",
+         "result_value": "Total: 260", "unit": "mg/dL", "reference_range": "< 200", "is_abnormal": 1,
+         "notes": "High cholesterol. LDL 172, HDL 38. Statin recommended.", "status": "completed"},
+        {"patient_id": 4, "ordered_by": 9, "lab_type": "Blood", "test_name": "C-Reactive Protein (CRP)",
+         "result_value": "3.8", "unit": "mg/L", "reference_range": "< 3.0", "is_abnormal": 1,
+         "notes": "Mildly elevated inflammatory marker", "status": "completed"},
+
+        # Carlos Mendez
+        {"patient_id": 6, "ordered_by": 4, "lab_type": "Blood", "test_name": "HbA1c",
+         "result_value": "6.8", "unit": "%", "reference_range": "< 7.0 (diabetic target)", "is_abnormal": 0,
+         "notes": "At target. Improved from 7.4 three months ago.", "status": "completed"},
+        {"patient_id": 6, "ordered_by": 4, "lab_type": "Blood", "test_name": "Fasting Glucose",
+         "result_value": "128", "unit": "mg/dL", "reference_range": "70 - 130 (diabetic target)", "is_abnormal": 0,
+         "notes": "Within diabetic target range", "status": "completed"},
+
+        # Sarah Kim - pending labs
+        {"patient_id": 7, "ordered_by": 3, "lab_type": "Blood", "test_name": "Comprehensive Metabolic Panel",
+         "result_value": None, "unit": None, "reference_range": None, "is_abnormal": 0,
+         "notes": "Ordered during new patient visit. Awaiting results.", "status": "pending"},
+        {"patient_id": 7, "ordered_by": 3, "lab_type": "Blood", "test_name": "Complete Blood Count (CBC)",
+         "result_value": None, "unit": None, "reference_range": None, "is_abnormal": 0,
+         "notes": "Ordered during new patient visit. Awaiting results.", "status": "pending"},
+
+        # David O'Brien
+        {"patient_id": 8, "ordered_by": 4, "lab_type": "Blood", "test_name": "HbA1c",
+         "result_value": "8.2", "unit": "%", "reference_range": "< 7.0 (diabetic target)", "is_abnormal": 1,
+         "notes": "Above target. Medication adjustment may be needed.", "status": "completed"},
+        {"patient_id": 8, "ordered_by": 4, "lab_type": "Blood", "test_name": "Fasting Glucose",
+         "result_value": "185", "unit": "mg/dL", "reference_range": "70 - 130 (diabetic target)", "is_abnormal": 1,
+         "notes": "Elevated. Correlates with poor A1c control.", "status": "completed"},
+
+        # Michael Johnson
+        {"patient_id": 10, "ordered_by": 4, "lab_type": "Blood", "test_name": "Basic Metabolic Panel",
+         "result_value": "Normal", "unit": None, "reference_range": "See components", "is_abnormal": 0,
+         "notes": "Kidney function improved. Creatinine 1.1 (was 1.4)", "status": "completed"},
+        {"patient_id": 10, "ordered_by": 4, "lab_type": "Blood", "test_name": "eGFR",
+         "result_value": "72", "unit": "mL/min/1.73m2", "reference_range": "> 60", "is_abnormal": 0,
+         "notes": "Improved from 58 last quarter. Continue hydration.", "status": "completed"},
+        {"patient_id": 10, "ordered_by": 9, "lab_type": "Blood", "test_name": "Lipid Panel",
+         "result_value": "Total: 198", "unit": "mg/dL", "reference_range": "< 200", "is_abnormal": 0,
+         "notes": "Borderline. LDL 120, HDL 48. Lifestyle modifications recommended.", "status": "completed"},
+    ]
+
+    for lab in lab_results:
+        cursor.execute("""
+            INSERT INTO lab_results (patient_id, ordered_by, lab_type, test_name, result_value,
+                                     unit, reference_range, is_abnormal, notes, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (lab["patient_id"], lab["ordered_by"], lab["lab_type"], lab["test_name"],
+              lab["result_value"], lab["unit"], lab["reference_range"], lab["is_abnormal"],
+              lab["notes"], lab["status"]))
 
     print("Sample data seeded successfully!")
 
@@ -1495,6 +2029,522 @@ def delete_consultation_config(config_id: str) -> bool:
             (config_id,)
         )
         return cursor.rowcount > 0
+
+
+# =============================================================================
+# Vitals Operations
+# =============================================================================
+
+def add_vitals(patient_id: int, heart_rate=None, systolic_bp=None, diastolic_bp=None,
+               oxygen_level=None, temperature=None, respiratory_rate=None, weight=None,
+               notes=None, recorded_by=None) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO vitals (patient_id, recorded_by, heart_rate, systolic_bp, diastolic_bp,
+                               oxygen_level, temperature, respiratory_rate, weight, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (patient_id, recorded_by, heart_rate, systolic_bp, diastolic_bp,
+              oxygen_level, temperature, respiratory_rate, weight, notes))
+        return cursor.lastrowid
+
+
+def get_patient_vitals(patient_id: int, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT v.*, d.first_name || ' ' || d.last_name as recorded_by_name
+            FROM vitals v
+            LEFT JOIN doctors d ON v.recorded_by = d.id
+            WHERE v.patient_id = ?
+            ORDER BY v.recorded_at DESC LIMIT ?
+        """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_latest_vitals(patient_id: int) -> Optional[Dict]:
+    vitals = get_patient_vitals(patient_id, 1)
+    return vitals[0] if vitals else None
+
+
+# =============================================================================
+# Doctor Notes Operations
+# =============================================================================
+
+def create_doctor_note(doctor_id: int, patient_id: int, content: str = None,
+                       audio_url: str = None, note_type: str = 'text') -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO doctor_notes (doctor_id, patient_id, note_type, content, audio_url)
+            VALUES (?, ?, ?, ?, ?)
+        """, (doctor_id, patient_id, note_type, content, audio_url))
+        return cursor.lastrowid
+
+
+def get_patient_doctor_notes(patient_id: int, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT dn.*, d.first_name || ' ' || d.last_name as doctor_name,
+                   d.title as doctor_title, d.specialty as doctor_specialty,
+                   d.photo_url as doctor_photo
+            FROM doctor_notes dn
+            JOIN doctors d ON dn.doctor_id = d.id
+            WHERE dn.patient_id = ?
+            ORDER BY dn.created_at DESC LIMIT ?
+        """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_doctor_notes_by_doctor(doctor_id: int, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT dn.*, p.name as patient_name
+            FROM doctor_notes dn
+            JOIN patients p ON dn.patient_id = p.id
+            WHERE dn.doctor_id = ?
+            ORDER BY dn.created_at DESC LIMIT ?
+        """, (doctor_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def mark_notes_read(patient_id: int):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE doctor_notes SET is_read = 1 WHERE patient_id = ? AND is_read = 0",
+            (patient_id,)
+        )
+
+
+def get_unread_notes_count(patient_id: int) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as count FROM doctor_notes WHERE patient_id = ? AND is_read = 0",
+            (patient_id,)
+        )
+        return cursor.fetchone()['count']
+
+
+# =============================================================================
+# Journal Entry Operations
+# =============================================================================
+
+def create_journal_entry(patient_id: int, entry_text: str = None, mood: str = None,
+                         pain_level: int = None, symptoms: str = None) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO journal_entries (patient_id, entry_text, mood, pain_level, symptoms)
+            VALUES (?, ?, ?, ?, ?)
+        """, (patient_id, entry_text, mood, pain_level, symptoms))
+        return cursor.lastrowid
+
+
+def get_patient_journal(patient_id: int, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM journal_entries WHERE patient_id = ?
+            ORDER BY created_at DESC LIMIT ?
+        """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_today_journal(patient_id: int) -> Optional[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM journal_entries
+            WHERE patient_id = ? AND DATE(created_at) = DATE('now')
+            ORDER BY created_at DESC LIMIT 1
+        """, (patient_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+# =============================================================================
+# Billing Operations
+# =============================================================================
+
+def create_billing(patient_id: int, description: str, amount: float,
+                   insurance_covered: float = 0, patient_responsibility: float = 0,
+                   appointment_id: int = None, status: str = 'pending') -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO billing (patient_id, appointment_id, description, amount,
+                                insurance_covered, patient_responsibility, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (patient_id, appointment_id, description, amount,
+              insurance_covered, patient_responsibility, status))
+        return cursor.lastrowid
+
+
+def get_patient_billing(patient_id: int, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT b.*, p.name as patient_name
+            FROM billing b
+            JOIN patients p ON b.patient_id = p.id
+            WHERE b.patient_id = ?
+            ORDER BY b.created_at DESC LIMIT ?
+        """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_all_billing(status: str = None, limit: int = 100) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT b.*, p.name as patient_name
+            FROM billing b
+            JOIN patients p ON b.patient_id = p.id
+        """
+        params = []
+        if status:
+            query += " WHERE b.status = ?"
+            params.append(status)
+        query += " ORDER BY b.created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_billing_summary() -> Dict:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT SUM(amount) as total_billed FROM billing")
+        total_billed = cursor.fetchone()['total_billed'] or 0
+        cursor.execute("SELECT SUM(insurance_covered) as total_insurance FROM billing")
+        total_insurance = cursor.fetchone()['total_insurance'] or 0
+        cursor.execute("SELECT SUM(patient_responsibility) as total_patient FROM billing WHERE status != 'paid'")
+        outstanding = cursor.fetchone()['total_patient'] or 0
+        cursor.execute("""
+            SELECT SUM(patient_responsibility) - SUM(CASE WHEN status='paid' THEN patient_responsibility ELSE 0 END)
+            as credit_balance FROM billing
+        """)
+        cursor.execute("SELECT COUNT(*) as count FROM billing WHERE status = 'pending'")
+        pending_count = cursor.fetchone()['count']
+        return {
+            "total_billed": total_billed,
+            "total_insurance_covered": total_insurance,
+            "outstanding_balance": outstanding,
+            "pending_claims": pending_count
+        }
+
+
+# =============================================================================
+# Insurance Operations
+# =============================================================================
+
+def add_insurance(patient_id: int, provider_name: str, policy_number: str = None,
+                  group_number: str = None, copay: float = None, deductible: float = None) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO insurance (patient_id, provider_name, policy_number, group_number, copay, deductible)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (patient_id, provider_name, policy_number, group_number, copay, deductible))
+        return cursor.lastrowid
+
+
+def get_patient_insurance(patient_id: int) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM insurance WHERE patient_id = ? ORDER BY is_primary DESC", (patient_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# Prescription Operations
+# =============================================================================
+
+def create_prescription(patient_id: int, doctor_id: int, medication_name: str,
+                        dosage: str = None, frequency: str = None, quantity: int = None,
+                        refills: int = 0, instructions: str = None, pharmacy: str = None) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO prescriptions (patient_id, doctor_id, medication_name, dosage, frequency,
+                                       quantity, refills, instructions, pharmacy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (patient_id, doctor_id, medication_name, dosage, frequency,
+              quantity, refills, instructions, pharmacy))
+        return cursor.lastrowid
+
+
+def get_patient_prescriptions(patient_id: int, active_only: bool = True) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT p.*, d.first_name || ' ' || d.last_name as doctor_name
+            FROM prescriptions p
+            JOIN doctors d ON p.doctor_id = d.id
+            WHERE p.patient_id = ?
+        """
+        if active_only:
+            query += " AND p.status = 'active'"
+        query += " ORDER BY p.prescribed_date DESC"
+        cursor.execute(query, (patient_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# Lab Results Operations
+# =============================================================================
+
+def create_lab_result(patient_id: int, lab_type: str, test_name: str,
+                      ordered_by: int = None, result_value: str = None,
+                      unit: str = None, reference_range: str = None,
+                      is_abnormal: bool = False, notes: str = None) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO lab_results (patient_id, ordered_by, lab_type, test_name,
+                                     result_value, unit, reference_range, is_abnormal, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (patient_id, ordered_by, lab_type, test_name,
+              result_value, unit, reference_range, 1 if is_abnormal else 0, notes))
+        return cursor.lastrowid
+
+
+def get_patient_labs(patient_id: int, lab_type: str = None, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT lr.*, d.first_name || ' ' || d.last_name as ordered_by_name
+            FROM lab_results lr
+            LEFT JOIN doctors d ON lr.ordered_by = d.id
+            WHERE lr.patient_id = ?
+        """
+        params = [patient_id]
+        if lab_type:
+            query += " AND lr.lab_type = ?"
+            params.append(lab_type)
+        query += " ORDER BY lr.ordered_date DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# Appointment Operations (extended)
+# =============================================================================
+
+def get_appointments_by_doctor(doctor_id: int, status: str = None, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT a.*, p.name as patient_name, cs.service_name,
+                   c.name as clinic_name
+            FROM appointments a
+            LEFT JOIN patients p ON a.patient_id = p.id
+            LEFT JOIN clinic_services cs ON a.service_id = cs.id
+            LEFT JOIN clinics c ON a.clinic_id = c.id
+            WHERE a.doctor_id = ?
+        """
+        params = [doctor_id]
+        if status:
+            query += " AND a.status = ?"
+            params.append(status)
+        query += " ORDER BY a.appointment_date ASC, a.appointment_time ASC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_today_appointments(doctor_id: int = None) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT a.*, p.name as patient_name, cs.service_name,
+                   d.first_name || ' ' || d.last_name as doctor_name
+            FROM appointments a
+            LEFT JOIN patients p ON a.patient_id = p.id
+            LEFT JOIN clinic_services cs ON a.service_id = cs.id
+            LEFT JOIN doctors d ON a.doctor_id = d.id
+            WHERE DATE(a.appointment_date) = DATE('now')
+        """
+        params = []
+        if doctor_id:
+            query += " AND a.doctor_id = ?"
+            params.append(doctor_id)
+        query += " ORDER BY a.appointment_time ASC"
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_appointment_stats(doctor_id: int = None, days: int = 30) -> Dict:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        base = "WHERE DATE(a.appointment_date) >= DATE('now', ?)"
+        params = [f'-{days} days']
+        if doctor_id:
+            base += " AND a.doctor_id = ?"
+            params.append(doctor_id)
+
+        cursor.execute(f"SELECT COUNT(*) as total FROM appointments a {base}", params)
+        total = cursor.fetchone()['total']
+
+        cursor.execute(f"SELECT COUNT(*) as kept FROM appointments a {base} AND a.status = 'completed'", params)
+        kept = cursor.fetchone()['kept']
+
+        cursor.execute(f"SELECT COUNT(*) as missed FROM appointments a {base} AND a.status = 'no_show'", params)
+        missed = cursor.fetchone()['missed']
+
+        cursor.execute(f"SELECT COUNT(*) as scheduled FROM appointments a {base} AND a.status = 'scheduled'", params)
+        scheduled = cursor.fetchone()['scheduled']
+
+        return {
+            "total": total,
+            "kept": kept,
+            "missed": missed,
+            "scheduled": scheduled,
+            "no_show_rate": round((missed / total * 100), 1) if total > 0 else 0
+        }
+
+
+def create_appointment(patient_id: int, doctor_id: int, clinic_id: int,
+                       appointment_date: str, appointment_time: str,
+                       service_id: int = None, duration_minutes: int = 30,
+                       notes: str = None, reason: str = None) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO appointments (patient_id, doctor_id, clinic_id, service_id,
+                                     appointment_date, appointment_time, duration_minutes, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (patient_id, doctor_id, clinic_id, service_id,
+              appointment_date, appointment_time, duration_minutes,
+              notes or reason))
+        return cursor.lastrowid
+
+
+def update_appointment_status(appointment_id: int, status: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE appointments SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, appointment_id)
+        )
+        return cursor.rowcount > 0
+
+
+def get_patient_appointments(patient_id: int, limit: int = 20) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT a.*, d.first_name || ' ' || d.last_name as doctor_name,
+                   d.specialty as doctor_specialty, cs.service_name, c.name as clinic_name
+            FROM appointments a
+            LEFT JOIN doctors d ON a.doctor_id = d.id
+            LEFT JOIN clinic_services cs ON a.service_id = cs.id
+            LEFT JOIN clinics c ON a.clinic_id = c.id
+            WHERE a.patient_id = ?
+            ORDER BY a.appointment_date DESC, a.appointment_time DESC LIMIT ?
+        """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# Doctor Feed Helpers (Stories + Feed for Instagram-style Doctor Portal)
+# =============================================================================
+
+def get_doctor_patient_stories(doctor_id: int) -> List[Dict]:
+    """Get patients with today's updates for the stories bar."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT p.id as patient_id, p.name as patient_name,
+                   (SELECT COUNT(*) FROM journal_entries je
+                    WHERE je.patient_id = p.id AND DATE(je.created_at) = DATE('now')) as today_entries,
+                   (SELECT je.entry_text FROM journal_entries je
+                    WHERE je.patient_id = p.id AND DATE(je.created_at) = DATE('now')
+                    ORDER BY je.created_at DESC LIMIT 1) as latest_entry,
+                   (SELECT je.mood FROM journal_entries je
+                    WHERE je.patient_id = p.id AND DATE(je.created_at) = DATE('now')
+                    ORDER BY je.created_at DESC LIMIT 1) as latest_mood,
+                   (SELECT COUNT(*) FROM doctor_notes dn
+                    WHERE dn.patient_id = p.id AND dn.doctor_id = ? AND DATE(dn.created_at) = DATE('now')) as viewed
+            FROM patients p
+            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = ?
+            WHERE EXISTS (
+                SELECT 1 FROM journal_entries je
+                WHERE je.patient_id = p.id AND DATE(je.created_at) = DATE('now')
+            )
+            ORDER BY p.name ASC
+        """, (doctor_id, doctor_id))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_doctor_feed_summaries(doctor_id: int, limit: int = 50) -> List[Dict]:
+    """Get patient summaries for the doctor's feed, alphabetical by patient name."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT s.*, p.name as patient_name, p.id as patient_id,
+                   p.date_of_birth
+            FROM summaries s
+            JOIN patients p ON s.patient_id = p.id
+            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = ?
+            ORDER BY p.name ASC, s.created_at DESC
+        """, (doctor_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_all_patients_for_doctor(doctor_id: int) -> List[Dict]:
+    """Get all patients for a specific doctor."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT p.*,
+                   (SELECT MAX(a2.appointment_date) FROM appointments a2
+                    WHERE a2.patient_id = p.id AND a2.doctor_id = ?) as last_visit,
+                   (SELECT COUNT(*) FROM summaries s WHERE s.patient_id = p.id) as summary_count,
+                   (SELECT COUNT(*) FROM prescriptions pr WHERE pr.patient_id = p.id AND pr.status = 'active') as active_prescriptions
+            FROM patients p
+            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = ?
+            ORDER BY p.name ASC
+        """, (doctor_id, doctor_id))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# ClinicAdmin Dashboard Helpers
+# =============================================================================
+
+def get_clinic_admin_stats(clinic_id: int = None) -> Dict:
+    with get_db() as conn:
+        cursor = conn.cursor()
+
+        # Today's intakes
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM appointments
+            WHERE DATE(appointment_date) = DATE('now') AND status IN ('scheduled', 'completed')
+        """)
+        today_sessions = cursor.fetchone()['count']
+
+        # Total patients
+        cursor.execute("SELECT COUNT(*) as count FROM patients")
+        total_patients = cursor.fetchone()['count']
+
+        # Appointment stats
+        apt_stats = get_appointment_stats()
+
+        # Billing summary
+        bill_summary = get_billing_summary()
+
+        return {
+            "today_sessions": today_sessions,
+            "total_patients": total_patients,
+            "appointment_stats": apt_stats,
+            "billing_summary": bill_summary
+        }
 
 
 # Initialize database on module import

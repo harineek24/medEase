@@ -4,21 +4,23 @@ import { API_BASE_URL } from './api'
 import './App.css'
 
 // Import components
-import Navigation from './components/Navigation'
 import PatientChat from './components/PatientChat'
 import GeneralChat from './components/GeneralChat'
 import Dashboard from './components/Dashboard'
 import History from './components/History'
 import VoiceConsult from './components/VoiceConsult'
 import ConsultConfig from './components/ConsultConfig'
-import { Hero } from './components/ui/helix-hero'
 import { HelixScene } from './components/ui/helix-scene'
 import { Ripple } from './components/ui/material-design-3-ripple'
 import BlurEffect from 'react-progressive-blur'
 import { Upload, Shield, Zap, MessageSquare } from 'lucide-react'
+import AppRouter from '@/AppRouter'
+import { AuthProvider } from '@/contexts/AuthContext'
 
-type AppView = 'landing' | 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config'
 type AppState = 'upload' | 'processing' | 'results'
+
+// Extended view type that includes the new patient-portal views
+export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health'
 
 interface SummaryData {
   summary: string
@@ -81,10 +83,16 @@ interface DrugInteraction {
   recommendation: string
 }
 
-function App() {
-  // View state - start with landing page
-  const [currentView, setCurrentView] = useState<AppView>('landing')
+/* ------------------------------------------------------------------ */
+/*  PatientApp -- the full patient experience, used by PatientLayout   */
+/* ------------------------------------------------------------------ */
 
+interface PatientAppProps {
+  currentView: PatientView
+  onNavigate: (view: PatientView) => void
+}
+
+export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
   // Upload flow state
   const [appState, setAppState] = useState<AppState>('upload')
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null)
@@ -262,7 +270,7 @@ function App() {
       } else {
         setSaveStatus('error')
       }
-    } catch (err) {
+    } catch (_err) {
       setSaveStatus('error')
     }
   }
@@ -288,14 +296,6 @@ function App() {
     setFilteredSummary('')
     setInteractions([])
     setSaveStatus('idle')
-  }
-
-  // Handle navigation
-  const handleNavigate = (view: AppView) => {
-    setCurrentView(view)
-    if (view === 'upload' && appState === 'results') {
-      // Keep results when navigating back
-    }
   }
 
   // Extract data from summary when it's generated
@@ -434,9 +434,9 @@ function App() {
   const filterSummary = (summary: string): string => {
     const sections = summary.split(/(?=## )/g)
     const filtered = sections.filter(section => {
-      return !section.includes('## 📋 Quick Overview') &&
-             !section.includes('## 💊 Your Medications') &&
-             !section.includes('## 🔬 Test Results')
+      return !section.includes('## Quick Overview') &&
+             !section.includes('## Your Medications') &&
+             !section.includes('## Test Results')
     })
     return filtered.join('\n')
   }
@@ -445,7 +445,7 @@ function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard onViewHistory={() => setCurrentView('history')} />
+        return <Dashboard onViewHistory={() => onNavigate('history')} />
 
       case 'history':
         return <History />
@@ -458,6 +458,26 @@ function App() {
 
       case 'config':
         return <ConsultConfig />
+
+      case 'updates':
+        return (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="text-center">
+              <h2 className="text-2xl font-light text-gray-900 mb-2">Updates</h2>
+              <p className="text-gray-500 text-sm">Your health updates will appear here.</p>
+            </div>
+          </div>
+        )
+
+      case 'health':
+        return (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="text-center">
+              <h2 className="text-2xl font-light text-gray-900 mb-2">Health</h2>
+              <p className="text-gray-500 text-sm">Your health tracking dashboard is coming soon.</p>
+            </div>
+          </div>
+        )
 
       case 'upload':
       default:
@@ -786,7 +806,7 @@ function App() {
       {selectedMedication && (
         <div className="modal-overlay" onClick={closeMedicationModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={closeMedicationModal}>×</button>
+            <button className="modal-close" onClick={closeMedicationModal}>x</button>
 
             <div className="modal-header">
               <h2>{selectedMedication}</h2>
@@ -929,7 +949,7 @@ function App() {
       {selectedTest && (
         <div className="modal-overlay" onClick={() => setSelectedTest(null)}>
           <div className="modal-content test-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setSelectedTest(null)}>×</button>
+            <button className="modal-close" onClick={() => setSelectedTest(null)}>x</button>
 
             <div className="modal-header">
               <h2>{selectedTest.name}</h2>
@@ -987,32 +1007,30 @@ function App() {
     </>
   )
 
-  // Show landing page hero
-  if (currentView === 'landing') {
-    return (
-      <Hero
-        title="MedEase"
-        description="Transform complex medical records into clear, actionable insights. Powered by AI to help you understand your health better."
-        onGetStarted={() => setCurrentView('upload')}
-      />
-    )
-  }
-
+  // Render the patient content (Navigation is handled by PatientLayout)
   return (
-    <div className="app">
-      <Navigation currentView={currentView} onNavigate={handleNavigate} />
+    <div className={currentView === 'upload' && appState === 'upload' ? '' : 'container'}>
+      {currentView === 'upload' && appState === 'results' && (
+        <header className="header">
+          <h1>MedEase</h1>
+          <p className="subtitle">Transform complex medical records into clear, understandable summaries</p>
+        </header>
+      )}
 
-      <div className={currentView === 'upload' && appState === 'upload' ? '' : 'container'}>
-        {currentView === 'upload' && appState === 'results' && (
-          <header className="header">
-            <h1>MedEase</h1>
-            <p className="subtitle">Transform complex medical records into clear, understandable summaries</p>
-          </header>
-        )}
-
-        {renderView()}
-      </div>
+      {renderView()}
     </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Default export -- the routed App with AuthProvider + AppRouter      */
+/* ------------------------------------------------------------------ */
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppRouter />
+    </AuthProvider>
   )
 }
 

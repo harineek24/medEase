@@ -1535,6 +1535,595 @@ async def admin_login(request: AdminLoginRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =============================================================================
+# Pydantic Models for New Endpoints
+# =============================================================================
+
+class CreateAppointmentRequest(BaseModel):
+    patient_id: int
+    doctor_id: int
+    clinic_id: int
+    appointment_date: str
+    appointment_time: str
+    service_id: Optional[int] = None
+    duration_minutes: int = 30
+    notes: Optional[str] = None
+
+
+class UpdateAppointmentStatusRequest(BaseModel):
+    status: str  # scheduled, completed, no_show, cancelled
+
+
+class CreateBillingRequest(BaseModel):
+    patient_id: int
+    description: str
+    amount: float
+    insurance_covered: float = 0
+    patient_responsibility: float = 0
+    appointment_id: Optional[int] = None
+    status: str = "pending"
+
+
+class CreateDoctorNoteRequest(BaseModel):
+    doctor_id: int
+    patient_id: int
+    content: Optional[str] = None
+    audio_url: Optional[str] = None
+    note_type: str = "text"
+
+
+class CreatePrescriptionRequest(BaseModel):
+    patient_id: int
+    medication_name: str
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    quantity: Optional[int] = None
+    refills: int = 0
+    instructions: Optional[str] = None
+    pharmacy: Optional[str] = None
+
+
+class RecordVitalsRequest(BaseModel):
+    patient_id: int
+    heart_rate: Optional[float] = None
+    systolic_bp: Optional[float] = None
+    diastolic_bp: Optional[float] = None
+    oxygen_level: Optional[float] = None
+    temperature: Optional[float] = None
+    respiratory_rate: Optional[float] = None
+    weight: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class CreateJournalEntryRequest(BaseModel):
+    entry_text: Optional[str] = None
+    mood: Optional[str] = None
+    pain_level: Optional[int] = None
+    symptoms: Optional[str] = None
+
+
+class MarkNotesReadRequest(BaseModel):
+    pass  # No body needed, patient_id comes from path
+
+
+# =============================================================================
+# ClinicAdmin Endpoints (/api/clinicadmin/)
+# =============================================================================
+
+@app.get("/api/clinicadmin/stats")
+async def clinicadmin_stats():
+    """Clinic admin dashboard stats."""
+    try:
+        stats = db.get_clinic_admin_stats()
+        return JSONResponse(content=stats)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting clinic admin stats: {str(e)}")
+
+
+@app.get("/api/clinicadmin/appointments")
+async def clinicadmin_appointments(
+    status: Optional[str] = None,
+    doctor_id: Optional[int] = None,
+    limit: int = 100
+):
+    """All appointments with optional filters."""
+    try:
+        with db.get_db() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT a.*, p.name as patient_name, cs.service_name,
+                       d.first_name || ' ' || d.last_name as doctor_name,
+                       c.name as clinic_name
+                FROM appointments a
+                LEFT JOIN patients p ON a.patient_id = p.id
+                LEFT JOIN clinic_services cs ON a.service_id = cs.id
+                LEFT JOIN doctors d ON a.doctor_id = d.id
+                LEFT JOIN clinics c ON a.clinic_id = c.id
+                WHERE 1=1
+            """
+            params = []
+            if status:
+                query += " AND a.status = ?"
+                params.append(status)
+            if doctor_id:
+                query += " AND a.doctor_id = ?"
+                params.append(doctor_id)
+            query += " ORDER BY a.appointment_date DESC, a.appointment_time ASC LIMIT ?"
+            params.append(limit)
+            cursor.execute(query, params)
+            appointments = [dict(row) for row in cursor.fetchall()]
+        return JSONResponse(content={"appointments": appointments, "count": len(appointments)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting appointments: {str(e)}")
+
+
+@app.get("/api/clinicadmin/appointments/today")
+async def clinicadmin_today_appointments():
+    """Today's appointments."""
+    try:
+        appointments = db.get_today_appointments()
+        return JSONResponse(content={"appointments": appointments, "count": len(appointments)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting today's appointments: {str(e)}")
+
+
+@app.post("/api/clinicadmin/appointments")
+async def clinicadmin_create_appointment(request: CreateAppointmentRequest):
+    """Create a new appointment."""
+    try:
+        appointment_id = db.create_appointment(
+            patient_id=request.patient_id,
+            doctor_id=request.doctor_id,
+            clinic_id=request.clinic_id,
+            appointment_date=request.appointment_date,
+            appointment_time=request.appointment_time,
+            service_id=request.service_id,
+            duration_minutes=request.duration_minutes,
+            notes=request.notes
+        )
+        return JSONResponse(content={
+            "success": True,
+            "appointment_id": appointment_id,
+            "message": "Appointment created successfully"
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating appointment: {str(e)}")
+
+
+@app.put("/api/clinicadmin/appointments/{appointment_id}/status")
+async def clinicadmin_update_appointment_status(appointment_id: int, request: UpdateAppointmentStatusRequest):
+    """Update appointment status."""
+    try:
+        valid_statuses = ["scheduled", "completed", "no_show", "cancelled"]
+        if request.status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+        success = db.update_appointment_status(appointment_id, request.status)
+        if not success:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        return JSONResponse(content={"success": True, "message": f"Appointment status updated to {request.status}"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating appointment status: {str(e)}")
+
+
+@app.get("/api/clinicadmin/billing")
+async def clinicadmin_billing(status: Optional[str] = None, limit: int = 100):
+    """All billing records with optional status filter."""
+    try:
+        records = db.get_all_billing(status=status, limit=limit)
+        return JSONResponse(content={"billing": records, "count": len(records)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting billing records: {str(e)}")
+
+
+@app.get("/api/clinicadmin/billing/summary")
+async def clinicadmin_billing_summary():
+    """Billing summary stats."""
+    try:
+        summary = db.get_billing_summary()
+        return JSONResponse(content=summary)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting billing summary: {str(e)}")
+
+
+@app.post("/api/clinicadmin/billing")
+async def clinicadmin_create_billing(request: CreateBillingRequest):
+    """Create a new billing record."""
+    try:
+        billing_id = db.create_billing(
+            patient_id=request.patient_id,
+            description=request.description,
+            amount=request.amount,
+            insurance_covered=request.insurance_covered,
+            patient_responsibility=request.patient_responsibility,
+            appointment_id=request.appointment_id,
+            status=request.status
+        )
+        return JSONResponse(content={
+            "success": True,
+            "billing_id": billing_id,
+            "message": "Billing record created successfully"
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating billing record: {str(e)}")
+
+
+@app.get("/api/clinicadmin/insurance/{patient_id}")
+async def clinicadmin_patient_insurance(patient_id: int):
+    """Get patient insurance information."""
+    try:
+        insurance = db.get_patient_insurance(patient_id)
+        return JSONResponse(content={"insurance": insurance, "count": len(insurance)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting insurance: {str(e)}")
+
+
+@app.post("/api/clinicadmin/notes")
+async def clinicadmin_create_note(request: CreateDoctorNoteRequest):
+    """Create a doctor note for a patient (text or voice)."""
+    try:
+        note_id = db.create_doctor_note(
+            doctor_id=request.doctor_id,
+            patient_id=request.patient_id,
+            content=request.content,
+            audio_url=request.audio_url,
+            note_type=request.note_type
+        )
+        return JSONResponse(content={
+            "success": True,
+            "note_id": note_id,
+            "message": "Doctor note created successfully"
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating doctor note: {str(e)}")
+
+
+# =============================================================================
+# Doctor Endpoints (/api/doctor/)
+# =============================================================================
+
+@app.get("/api/doctor/{doctor_id}/feed/stories")
+async def doctor_feed_stories(doctor_id: int):
+    """Get patient stories for today (Instagram-style stories bar)."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        stories = db.get_doctor_patient_stories(doctor_id)
+        return JSONResponse(content={"stories": stories, "count": len(stories)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting stories: {str(e)}")
+
+
+@app.get("/api/doctor/{doctor_id}/feed/appointments")
+async def doctor_feed_appointments(doctor_id: int):
+    """Get today's appointments for the doctor."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        appointments = db.get_today_appointments(doctor_id=doctor_id)
+        return JSONResponse(content={"appointments": appointments, "count": len(appointments)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting doctor appointments: {str(e)}")
+
+
+@app.get("/api/doctor/{doctor_id}/feed/summaries")
+async def doctor_feed_summaries(doctor_id: int):
+    """Get all patient summaries for the doctor, alphabetical."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        summaries = db.get_doctor_feed_summaries(doctor_id)
+        return JSONResponse(content={"summaries": summaries, "count": len(summaries)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting summaries: {str(e)}")
+
+
+@app.get("/api/doctor/{doctor_id}/patients")
+async def doctor_patients(doctor_id: int):
+    """Get all patients for a doctor."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        patients = db.get_all_patients_for_doctor(doctor_id)
+        return JSONResponse(content={"patients": patients, "count": len(patients)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting doctor patients: {str(e)}")
+
+
+@app.get("/api/doctor/{doctor_id}/patients/{patient_id}/detail")
+async def doctor_patient_detail(doctor_id: int, patient_id: int):
+    """Full patient detail: vitals, meds, labs, prescriptions, notes, appointments."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        # Gather all patient data
+        vitals = db.get_patient_vitals(patient_id)
+        latest_vitals = db.get_latest_vitals(patient_id)
+        prescriptions = db.get_patient_prescriptions(patient_id, active_only=False)
+        labs = db.get_patient_labs(patient_id)
+        notes = db.get_patient_doctor_notes(patient_id)
+        appointments = db.get_patient_appointments(patient_id)
+        journal = db.get_patient_journal(patient_id)
+        insurance = db.get_patient_insurance(patient_id)
+        summaries = db.get_patient_summaries(patient_id)
+        billing = db.get_patient_billing(patient_id)
+
+        return JSONResponse(content={
+            "patient": patient,
+            "vitals": vitals,
+            "latest_vitals": latest_vitals,
+            "prescriptions": prescriptions,
+            "lab_results": labs,
+            "doctor_notes": notes,
+            "appointments": appointments,
+            "journal_entries": journal,
+            "insurance": insurance,
+            "summaries": summaries,
+            "billing": billing
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting patient detail: {str(e)}")
+
+
+@app.post("/api/doctor/{doctor_id}/notes")
+async def doctor_create_note(doctor_id: int, request: CreateDoctorNoteRequest):
+    """Create a note for a patient from a specific doctor."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        note_id = db.create_doctor_note(
+            doctor_id=doctor_id,
+            patient_id=request.patient_id,
+            content=request.content,
+            audio_url=request.audio_url,
+            note_type=request.note_type
+        )
+        return JSONResponse(content={
+            "success": True,
+            "note_id": note_id,
+            "message": "Note created successfully"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating note: {str(e)}")
+
+
+@app.post("/api/doctor/{doctor_id}/prescriptions")
+async def doctor_create_prescription(doctor_id: int, request: CreatePrescriptionRequest):
+    """Create a prescription for a patient."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        prescription_id = db.create_prescription(
+            patient_id=request.patient_id,
+            doctor_id=doctor_id,
+            medication_name=request.medication_name,
+            dosage=request.dosage,
+            frequency=request.frequency,
+            quantity=request.quantity,
+            refills=request.refills,
+            instructions=request.instructions,
+            pharmacy=request.pharmacy
+        )
+        return JSONResponse(content={
+            "success": True,
+            "prescription_id": prescription_id,
+            "message": "Prescription created successfully"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating prescription: {str(e)}")
+
+
+@app.post("/api/doctor/{doctor_id}/vitals")
+async def doctor_record_vitals(doctor_id: int, request: RecordVitalsRequest):
+    """Record vitals for a patient."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        vitals_id = db.add_vitals(
+            patient_id=request.patient_id,
+            recorded_by=doctor_id,
+            heart_rate=request.heart_rate,
+            systolic_bp=request.systolic_bp,
+            diastolic_bp=request.diastolic_bp,
+            oxygen_level=request.oxygen_level,
+            temperature=request.temperature,
+            respiratory_rate=request.respiratory_rate,
+            weight=request.weight,
+            notes=request.notes
+        )
+        return JSONResponse(content={
+            "success": True,
+            "vitals_id": vitals_id,
+            "message": "Vitals recorded successfully"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error recording vitals: {str(e)}")
+
+
+# =============================================================================
+# Patient Portal Endpoints (/api/portal/)
+# =============================================================================
+
+@app.get("/api/portal/patient/{patient_id}/vitals")
+async def portal_patient_vitals(patient_id: int):
+    """Get patient's vitals history."""
+    try:
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        vitals = db.get_patient_vitals(patient_id)
+        latest = db.get_latest_vitals(patient_id)
+        return JSONResponse(content={"vitals": vitals, "latest": latest, "count": len(vitals)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting vitals: {str(e)}")
+
+
+@app.get("/api/portal/patient/{patient_id}/notes")
+async def portal_patient_notes(patient_id: int):
+    """Get doctor notes for a patient (updates portal)."""
+    try:
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        notes = db.get_patient_doctor_notes(patient_id)
+        unread_count = db.get_unread_notes_count(patient_id)
+        return JSONResponse(content={"notes": notes, "unread_count": unread_count, "count": len(notes)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting notes: {str(e)}")
+
+
+@app.post("/api/portal/patient/{patient_id}/notes/read")
+async def portal_mark_notes_read(patient_id: int):
+    """Mark all notes as read for a patient."""
+    try:
+        db.mark_notes_read(patient_id)
+        return JSONResponse(content={"success": True, "message": "Notes marked as read"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error marking notes as read: {str(e)}")
+
+
+@app.get("/api/portal/patient/{patient_id}/journal")
+async def portal_patient_journal(patient_id: int, limit: int = 50):
+    """Get patient journal entries."""
+    try:
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        entries = db.get_patient_journal(patient_id, limit=limit)
+        today_entry = db.get_today_journal(patient_id)
+        return JSONResponse(content={
+            "entries": entries,
+            "today_entry": today_entry,
+            "count": len(entries)
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting journal: {str(e)}")
+
+
+@app.post("/api/portal/patient/{patient_id}/journal")
+async def portal_create_journal_entry(patient_id: int, request: CreateJournalEntryRequest):
+    """Create a journal entry for a patient."""
+    try:
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        entry_id = db.create_journal_entry(
+            patient_id=patient_id,
+            entry_text=request.entry_text,
+            mood=request.mood,
+            pain_level=request.pain_level,
+            symptoms=request.symptoms
+        )
+        return JSONResponse(content={
+            "success": True,
+            "entry_id": entry_id,
+            "message": "Journal entry created successfully"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating journal entry: {str(e)}")
+
+
+@app.get("/api/portal/patient/{patient_id}/prescriptions")
+async def portal_patient_prescriptions(patient_id: int, active_only: bool = True):
+    """Get patient prescriptions."""
+    try:
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        prescriptions = db.get_patient_prescriptions(patient_id, active_only=active_only)
+        return JSONResponse(content={"prescriptions": prescriptions, "count": len(prescriptions)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting prescriptions: {str(e)}")
+
+
+@app.get("/api/portal/patient/{patient_id}/appointments")
+async def portal_patient_appointments(patient_id: int, limit: int = 20):
+    """Get patient appointments."""
+    try:
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        appointments = db.get_patient_appointments(patient_id, limit=limit)
+        return JSONResponse(content={"appointments": appointments, "count": len(appointments)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting appointments: {str(e)}")
+
+
+@app.get("/api/portal/patient/{patient_id}/labs")
+async def portal_patient_labs(patient_id: int, lab_type: Optional[str] = None):
+    """Get patient lab results."""
+    try:
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        labs = db.get_patient_labs(patient_id, lab_type=lab_type)
+        return JSONResponse(content={"lab_results": labs, "count": len(labs)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting lab results: {str(e)}")
+
+
+@app.get("/api/portal/patient/{patient_id}/insurance")
+async def portal_patient_insurance(patient_id: int):
+    """Get patient insurance information."""
+    try:
+        patient = db.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        insurance = db.get_patient_insurance(patient_id)
+        return JSONResponse(content={"insurance": insurance, "count": len(insurance)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting insurance: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
