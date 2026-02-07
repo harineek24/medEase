@@ -10,6 +10,7 @@ import Dashboard from './components/Dashboard'
 import History from './components/History'
 import VoiceConsult from './components/VoiceConsult'
 import ConsultConfig from './components/ConsultConfig'
+import Updates from './components/patient/Updates'
 import { HelixScene } from './components/ui/helix-scene'
 import { Ripple } from './components/ui/material-design-3-ripple'
 import BlurEffect from 'react-progressive-blur'
@@ -803,14 +804,7 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
         return <ConsultConfig />
 
       case 'updates':
-        return (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <div className="text-center">
-              <h2 className="text-2xl font-light text-gray-900 mb-2">Updates</h2>
-              <p className="text-gray-500 text-sm">Your health updates will appear here.</p>
-            </div>
-          </div>
-        )
+        return <Updates onNavigate={(v) => onNavigate(v as PatientView)} />
 
       case 'health':
         return renderHealthView()
