@@ -9,34 +9,34 @@ const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' 
 
   return (
     <div className="relative w-48 h-48 flex items-center justify-center">
-      <svg viewBox="0 0 100 100" className="w-full h-full">
+      <svg viewBox="0 0 100 100" className="w-full h-full" fill="none">
         {/* Stethoscope tube - left side */}
         <path
-          d="M 30 15 Q 15 15 15 35 Q 15 55 25 65 Q 35 75 50 85"
-          fill="none"
-          stroke="#9ca3af"
-          strokeWidth="4"
+          d="M 28 18 C 12 18 12 40 20 55 C 28 70 40 78 50 82"
+          stroke="#45BFD3"
+          strokeWidth="3"
           strokeLinecap="round"
+          fill="none"
         />
         {/* Stethoscope tube - right side */}
         <path
-          d="M 70 15 Q 85 15 85 35 Q 85 55 75 65 Q 65 75 50 85"
-          fill="none"
-          stroke="#9ca3af"
-          strokeWidth="4"
+          d="M 72 18 C 88 18 88 40 80 55 C 72 70 60 78 50 82"
+          stroke="#45BFD3"
+          strokeWidth="3"
           strokeLinecap="round"
+          fill="none"
         />
         {/* Ear pieces */}
-        <circle cx="30" cy="12" r="4" fill="#1f2937" />
-        <circle cx="70" cy="12" r="4" fill="#1f2937" />
+        <circle cx="28" cy="14" r="5" fill="#1f2937" />
+        <circle cx="72" cy="14" r="5" fill="#1f2937" />
         {/* Chest piece */}
-        <circle cx="50" cy="90" r="8" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2" />
-        <circle cx="50" cy="90" r="4" fill="#d1d5db" />
+        <circle cx="50" cy="88" r="9" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2" />
+        <circle cx="50" cy="88" r="4" fill="#d1d5db" />
       </svg>
 
       {/* Heart in the center */}
-      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] ${isBeating ? 'animate-heartbeat' : ''}`}>
-        <svg viewBox="0 0 24 24" className="w-16 h-16" style={{ filter: isBeating ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none' }}>
+      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[35%] ${isBeating ? 'animate-heartbeat' : ''}`}>
+        <svg viewBox="0 0 24 24" className="w-14 h-14" style={{ filter: isBeating ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none' }}>
           <path
             d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
             fill={heartColor}
@@ -48,8 +48,8 @@ const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' 
       {/* Pulse rings when speaking */}
       {isBeating && (
         <>
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] w-20 h-20 rounded-full border-2 border-red-400 animate-ping opacity-30" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] w-24 h-24 rounded-full border border-red-300 animate-ping opacity-20" style={{ animationDelay: '0.2s' }} />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[35%] w-18 h-18 rounded-full border-2 border-red-400 animate-ping opacity-30" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[35%] w-22 h-22 rounded-full border border-red-300 animate-ping opacity-20" style={{ animationDelay: '0.2s' }} />
         </>
       )}
 
