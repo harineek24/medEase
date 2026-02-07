@@ -156,29 +156,7 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
       const data: SummaryData = await response.json()
       setSummaryData(data)
       setAppState('results')
-
-      // Auto-save to database for Dashboard/History
-      try {
-        await fetch(`${API_BASE_URL}/api/save-summary`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            patient_name: data.patient_name || 'Unknown Patient',
-            raw_summary: data.summary,
-            file_path: data.markdown_path,
-            original_filename: file.name,
-            diagnosis: '',
-            visit_date: null,
-            visit_location: null,
-            medications: [],
-            test_results: [],
-            interactions: []
-          }),
-        })
-        setSaveStatus('saved')
-      } catch {
-        // Silent fail for auto-save — user can still manually save later
-      }
+      // Auto-save happens in a separate useEffect after AI extraction completes
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while processing the file')
       setAppState('upload')
@@ -298,10 +276,14 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
     setSaveStatus('idle')
   }
 
-  // Extract data from summary when it's generated
+  // Extract data from summary when it's generated, then auto-save
   useEffect(() => {
     const extractData = async () => {
       if (summaryData && summaryData.summary) {
+        let extractedMeds: Medication[] = []
+        let extractedInteractions: DrugInteraction[] = []
+        let extractedTests: TestResult[] = []
+
         // Extract medications
         try {
           const medsResponse = await fetch(`${API_BASE_URL}/api/extract-medications`, {
@@ -314,7 +296,7 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
 
           if (medsResponse.ok) {
             const medsData = await medsResponse.json()
-            const extractedMeds = medsData.medications || []
+            extractedMeds = medsData.medications || []
             setMedications(extractedMeds)
 
             // Analyze medications for interactions
@@ -330,7 +312,8 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
 
                 if (analysisResponse.ok) {
                   const analysisData = await analysisResponse.json()
-                  setInteractions(analysisData.interactions || [])
+                  extractedInteractions = analysisData.interactions || []
+                  setInteractions(extractedInteractions)
                 }
               } catch (err) {
                 console.error('Error analyzing medications:', err)
@@ -376,7 +359,8 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
 
           if (testsResponse.ok) {
             const testsData = await testsResponse.json()
-            setTestResults(testsData.test_results || [])
+            extractedTests = testsData.test_results || []
+            setTestResults(extractedTests)
           }
         } catch (err) {
           console.error('Error extracting test results:', err)
@@ -385,6 +369,29 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
         // Filter summary to remove sections we're displaying separately
         const filtered = filterSummary(summaryData.summary)
         setFilteredSummary(filtered)
+
+        // Auto-save to database AFTER all AI extraction is complete
+        try {
+          await fetch(`${API_BASE_URL}/api/save-summary`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              patient_name: summaryData.patient_name || 'Unknown Patient',
+              raw_summary: summaryData.summary,
+              file_path: summaryData.markdown_path,
+              original_filename: fileName,
+              diagnosis: '',
+              visit_date: null,
+              visit_location: null,
+              medications: extractedMeds,
+              test_results: extractedTests,
+              interactions: extractedInteractions
+            }),
+          })
+          setSaveStatus('saved')
+        } catch {
+          // Silent fail for auto-save — user can still manually save later
+        }
       }
     }
 
