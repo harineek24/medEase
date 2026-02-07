@@ -1,11 +1,81 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { API_BASE_URL, WS_BASE_URL } from '../api'
+import { Phone, PhoneOff, FileText } from 'lucide-react'
+
+// Stethoscope Heart Component
+const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' | 'thinking' }) => {
+  const heartColor = state === 'speaking' ? '#ef4444' : state === 'listening' ? '#22c55e' : '#374151'
+  const isBeating = state === 'speaking'
+
+  return (
+    <div className="relative w-48 h-48 flex items-center justify-center">
+      <svg viewBox="0 0 100 100" className="w-full h-full">
+        {/* Stethoscope tube - left side */}
+        <path
+          d="M 30 15 Q 15 15 15 35 Q 15 55 25 65 Q 35 75 50 85"
+          fill="none"
+          stroke="#9ca3af"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+        {/* Stethoscope tube - right side */}
+        <path
+          d="M 70 15 Q 85 15 85 35 Q 85 55 75 65 Q 65 75 50 85"
+          fill="none"
+          stroke="#9ca3af"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+        {/* Ear pieces */}
+        <circle cx="30" cy="12" r="4" fill="#1f2937" />
+        <circle cx="70" cy="12" r="4" fill="#1f2937" />
+        {/* Chest piece */}
+        <circle cx="50" cy="90" r="8" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2" />
+        <circle cx="50" cy="90" r="4" fill="#d1d5db" />
+      </svg>
+
+      {/* Heart in the center */}
+      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] ${isBeating ? 'animate-heartbeat' : ''}`}>
+        <svg viewBox="0 0 24 24" className="w-16 h-16" style={{ filter: isBeating ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none' }}>
+          <path
+            d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+            fill={heartColor}
+            className="transition-colors duration-300"
+          />
+        </svg>
+      </div>
+
+      {/* Pulse rings when speaking */}
+      {isBeating && (
+        <>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] w-20 h-20 rounded-full border-2 border-red-400 animate-ping opacity-30" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[40%] w-24 h-24 rounded-full border border-red-300 animate-ping opacity-20" style={{ animationDelay: '0.2s' }} />
+        </>
+      )}
+
+      {/* Listening indicator */}
+      {state === 'listening' && (
+        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+          <div className="w-1 h-3 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+          <div className="w-1 h-4 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+          <div className="w-1 h-3 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface ConsultationField {
   field_name: string
   label: string
   value: string
   confirmed: boolean
+}
+
+interface PendingField {
+  field_name: string
+  label: string
+  value: string
 }
 
 type DoctorState = 'idle' | 'listening' | 'speaking' | 'thinking'
@@ -23,9 +93,10 @@ function VoiceConsult() {
   // Collected fields (doctor's notes)
   const [fields, setFields] = useState<ConsultationField[]>([])
 
-  // Inline editing state
-  const [editingFieldName, setEditingFieldName] = useState<string | null>(null)
+  // Pending confirmation
+  const [pendingField, setPendingField] = useState<PendingField | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [isEditing, setIsEditing] = useState(false)
 
   // Transcripts (stored for potential future use in displaying conversation)
   const [, setTranscripts] = useState<Array<{ role: string; text: string }>>([])
@@ -204,10 +275,8 @@ function VoiceConsult() {
 
         switch (message.type) {
           case 'ready':
-            console.log('✅ READY: Session initialized', message)
             // Load any existing fields
             if (message.fields?.length > 0) {
-              console.log('📋 Loading existing fields:', message.fields)
               setFields(message.fields.map((f: { field_name: string; field_label: string; field_value: string; confirmed: number }) => ({
                 field_name: f.field_name,
                 label: f.field_label,
@@ -219,14 +288,12 @@ function VoiceConsult() {
 
           case 'audio':
             // Fallback for base64 audio (backwards compatibility)
-            console.log('🔊 Received base64 audio data')
             const audioBytes = Uint8Array.from(atob(message.data), c => c.charCodeAt(0))
             audioQueueRef.current.push(audioBytes.buffer)
             playAudioQueue()
             break
 
           case 'transcript':
-            console.log('💬 TRANSCRIPT:', message.role, message.text)
             setTranscripts(prev => [...prev, { role: message.role, text: message.text }])
             if (message.role === 'assistant') {
               setDoctorState('speaking')
@@ -234,35 +301,34 @@ function VoiceConsult() {
             break
 
           case 'field_extracted':
-            console.log('🎯 FIELD_EXTRACTED received:', {
+            // Add field to list immediately (will show as unconfirmed)
+            setFields(prev => {
+              const existing = prev.find(f => f.field_name === message.field_name)
+              if (existing) {
+                return prev.map(f =>
+                  f.field_name === message.field_name
+                    ? { ...f, label: message.label, value: message.value, confirmed: false }
+                    : f
+                )
+              }
+              return [...prev, {
+                field_name: message.field_name,
+                label: message.label,
+                value: message.value,
+                confirmed: false
+              }]
+            })
+            // Show confirmation popup
+            setPendingField({
               field_name: message.field_name,
               label: message.label,
               value: message.value
             })
-            // Add field to list immediately - auto-confirmed (no popup needed)
-            setFields(prev => {
-              console.log('📝 Current fields before update:', prev)
-              const existing = prev.find(f => f.field_name === message.field_name)
-              const newFields = existing
-                ? prev.map(f =>
-                    f.field_name === message.field_name
-                      ? { ...f, label: message.label, value: message.value, confirmed: true }
-                      : f
-                  )
-                : [...prev, {
-                    field_name: message.field_name,
-                    label: message.label,
-                    value: message.value,
-                    confirmed: true
-                  }]
-              console.log('📝 Fields after update:', newFields)
-              return newFields
-            })
+            setEditValue(message.value)
             break
 
           case 'field_confirmed':
           case 'field_updated':
-            console.log('✅ FIELD_CONFIRMED/UPDATED:', message.field_name, message.value)
             // Update fields list
             setFields(prev => {
               const existing = prev.find(f => f.field_name === message.field_name)
@@ -275,19 +341,14 @@ function VoiceConsult() {
               }
               return prev
             })
-            // Clear inline editing if this field was being edited
-            setEditingFieldName(null)
+            setPendingField(null)
             break
 
           case 'emergency':
-            console.log('🚨 EMERGENCY:', message.reason)
             setStatusText(`EMERGENCY: ${message.reason}`)
             // Show emergency alert
             alert(`EMERGENCY: ${message.reason}\n\nPlease call 911 immediately if you are experiencing a medical emergency.`)
             break
-
-          default:
-            console.log('❓ Unknown message type:', message.type, message)
         }
       }
 
@@ -342,48 +403,59 @@ function VoiceConsult() {
     setStatusText('Session ended')
   }
 
-  // Start editing a field inline
-  const startEditingField = (field: ConsultationField) => {
-    setEditingFieldName(field.field_name)
-    setEditValue(field.value)
+  // Confirm field
+  const confirmField = () => {
+    if (!pendingField || !wsRef.current) return
+
+    wsRef.current.send(JSON.stringify({
+      type: 'confirm_field',
+      field_name: pendingField.field_name
+    }))
+
+    // Add to fields list
+    setFields(prev => [...prev, {
+      field_name: pendingField.field_name,
+      label: pendingField.label,
+      value: pendingField.value,
+      confirmed: true
+    }])
+
+    setPendingField(null)
+    setIsEditing(false)
   }
 
-  // Save inline edit
-  const saveInlineEdit = (fieldName: string, label: string) => {
-    if (!wsRef.current) return
+  // Edit and confirm field
+  const editAndConfirm = () => {
+    if (!pendingField || !wsRef.current) return
 
-    // Send edit to backend
     wsRef.current.send(JSON.stringify({
       type: 'edit_field',
-      field_name: fieldName,
-      label: label,
+      field_name: pendingField.field_name,
+      label: pendingField.label,
       value: editValue
     }))
 
-    // Update local state immediately
-    setFields(prev => prev.map(f =>
-      f.field_name === fieldName
-        ? { ...f, value: editValue, confirmed: true }
-        : f
-    ))
+    // Add to fields list with edited value
+    setFields(prev => [...prev, {
+      field_name: pendingField.field_name,
+      label: pendingField.label,
+      value: editValue,
+      confirmed: true
+    }])
 
-    setEditingFieldName(null)
-    setEditValue('')
+    setPendingField(null)
+    setIsEditing(false)
   }
 
-  // Cancel inline edit
-  const cancelInlineEdit = () => {
-    setEditingFieldName(null)
-    setEditValue('')
-  }
-
-  // Handle keyboard events for inline edit
-  const handleEditKeyDown = (e: React.KeyboardEvent, fieldName: string, label: string) => {
-    if (e.key === 'Enter') {
-      saveInlineEdit(fieldName, label)
-    } else if (e.key === 'Escape') {
-      cancelInlineEdit()
-    }
+  // Edit existing field
+  const editExistingField = (field: ConsultationField) => {
+    setPendingField({
+      field_name: field.field_name,
+      label: field.label,
+      value: field.value
+    })
+    setEditValue(field.value)
+    setIsEditing(true)
   }
 
   // Get summary
@@ -468,53 +540,19 @@ function VoiceConsult() {
                 {fields.map((field, index) => (
                   <div
                     key={field.field_name}
-                    className={`note-field ${field.confirmed ? 'confirmed' : ''} ${editingFieldName === field.field_name ? 'editing' : ''}`}
+                    className={`note-field ${field.confirmed ? 'confirmed' : ''}`}
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
                     <div className="note-label">{field.label}:</div>
-                    {editingFieldName === field.field_name ? (
-                      <div className="note-edit-inline">
-                        <input
-                          type="text"
-                          className="note-edit-input"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onKeyDown={(e) => handleEditKeyDown(e, field.field_name, field.label)}
-                          autoFocus
-                        />
-                        <button
-                          className="note-save-btn"
-                          onClick={() => saveInlineEdit(field.field_name, field.label)}
-                          title="Save"
-                        >
-                          ✓
-                        </button>
-                        <button
-                          className="note-cancel-btn"
-                          onClick={cancelInlineEdit}
-                          title="Cancel"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div
-                          className="note-value"
-                          onClick={() => startEditingField(field)}
-                          title="Click to edit"
-                        >
-                          {field.value}
-                        </div>
-                        <button
-                          className="note-edit-btn"
-                          onClick={() => startEditingField(field)}
-                          title="Edit this field"
-                        >
-                          ✎
-                        </button>
-                      </>
-                    )}
+                    <div className="note-value">{field.value}</div>
+                    <button
+                      className="note-edit-btn"
+                      onClick={() => editExistingField(field)}
+                      title="Edit this field"
+                    >
+                      edit
+                    </button>
+                    {field.confirmed && <span className="note-check">ok</span>}
                   </div>
                 ))}
               </div>
@@ -528,102 +566,65 @@ function VoiceConsult() {
 
         {/* Right Side - Doctor Animation & Controls */}
         <div className="doctor-panel">
-          <div className="doctor-card">
-            {/* Doctor Avatar */}
-            <div className={`doctor-avatar-container ${doctorState}`}>
-              <div className="doctor-avatar-bg"></div>
-              <div className="doctor-figure">
-                <div className="doctor-head">
-                  <div className="doctor-face">
-                    <div className="doctor-eyes">
-                      <div className={`doctor-eye left ${doctorState === 'listening' ? 'attentive' : ''}`}>
-                        <div className="eye-pupil"></div>
-                      </div>
-                      <div className={`doctor-eye right ${doctorState === 'listening' ? 'attentive' : ''}`}>
-                        <div className="eye-pupil"></div>
-                      </div>
-                    </div>
-                    <div className={`doctor-mouth ${doctorState}`}></div>
-                  </div>
-                  <div className="doctor-hair"></div>
-                  <div className="stethoscope"></div>
-                </div>
-                <div className="doctor-body">
-                  <div className="doctor-coat">
-                    <div className="coat-collar"></div>
-                    <div className="name-tag">
-                      <span>Dr. MedAssist</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 flex flex-col items-center">
+            {/* Stethoscope Heart Animation */}
+            <StethoscopeHeart state={doctorState} />
 
-              {/* Sound waves when speaking */}
-              {doctorState === 'speaking' && (
-                <div className="sound-waves">
-                  <div className="wave"></div>
-                  <div className="wave"></div>
-                  <div className="wave"></div>
-                </div>
-              )}
-
-              {/* Listening indicator */}
-              {doctorState === 'listening' && (
-                <div className="listening-indicator">
-                  <div className="pulse-ring"></div>
-                  <div className="mic-icon">🎤</div>
-                </div>
-              )}
-            </div>
-
-            <div className="doctor-info">
-              <h3>Dr. MedAssist</h3>
-              <p className="doctor-specialty">AI Physician Assistant</p>
-              <p className={`doctor-status ${doctorState}`}>{statusText}</p>
+            <div className="text-center mt-4">
+              <h3 className="text-xl font-medium text-gray-900">Dr. MedAssist</h3>
+              <p className="text-sm text-[#45BFD3] mt-1">AI Physician Assistant</p>
+              <p className={`text-sm mt-2 ${
+                doctorState === 'speaking' ? 'text-red-500' :
+                doctorState === 'listening' ? 'text-green-500' :
+                'text-gray-500'
+              }`}>{statusText}</p>
             </div>
 
             {/* Recording indicator */}
             {isRecording && (
-              <div className="recording-indicator">
-                <div className="recording-dot"></div>
+              <div className="flex items-center gap-2 mt-4 text-sm text-red-500">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
                 <span>Recording</span>
               </div>
             )}
           </div>
 
           {/* Control Buttons */}
-          <div className="control-buttons">
+          <div className="flex flex-col gap-3 w-full mt-6">
             {!isConnected ? (
               <button
-                className="connect-btn"
+                className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-[#45BFD3] hover:bg-[#3aa8ba] text-white font-medium rounded-xl transition-all duration-200 shadow-lg disabled:opacity-50"
                 onClick={connect}
                 disabled={isConnecting}
               >
                 {isConnecting ? (
                   <>
-                    <span className="btn-spinner"></span>
-                    Connecting...
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Connecting...</span>
                   </>
                 ) : (
                   <>
-                    <span className="btn-icon">📞</span>
-                    Connect Now
+                    <Phone className="w-5 h-5" />
+                    <span>Connect Now</span>
                   </>
                 )}
               </button>
             ) : (
               <>
-                <button className="end-btn" onClick={disconnect}>
-                  <span className="btn-icon">📴</span>
-                  End Session
+                <button
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl transition-all duration-200"
+                  onClick={disconnect}
+                >
+                  <PhoneOff className="w-5 h-5" />
+                  <span>End Session</span>
                 </button>
                 <button
-                  className="summary-btn"
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl transition-all duration-200 disabled:opacity-50"
                   onClick={getSummary}
                   disabled={fields.length === 0}
                 >
-                  <span className="btn-icon">📋</span>
-                  Get Summary
+                  <FileText className="w-5 h-5" />
+                  <span>Get Summary</span>
                 </button>
               </>
             )}
@@ -637,6 +638,54 @@ function VoiceConsult() {
         </div>
       </div>
 
+      {/* Confirmation Popup */}
+      {pendingField && (
+        <div className="confirmation-overlay">
+          <div className="confirmation-popup">
+            <div className="popup-header">
+              <h3>I heard:</h3>
+            </div>
+
+            <div className="popup-content">
+              <div className="popup-field-label">{pendingField.label}</div>
+
+              {isEditing ? (
+                <input
+                  type="text"
+                  className="popup-edit-input"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  autoFocus
+                />
+              ) : (
+                <div className="popup-field-value">{pendingField.value}</div>
+              )}
+            </div>
+
+            <div className="popup-actions">
+              {isEditing ? (
+                <>
+                  <button className="popup-cancel" onClick={() => setIsEditing(false)}>
+                    Cancel
+                  </button>
+                  <button className="popup-save" onClick={editAndConfirm}>
+                    Save
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="popup-edit" onClick={() => setIsEditing(true)}>
+                    <span>edit</span> Edit
+                  </button>
+                  <button className="popup-confirm" onClick={confirmField}>
+                    <span>ok</span> Yes, correct
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
