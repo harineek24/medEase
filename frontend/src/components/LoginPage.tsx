@@ -22,12 +22,6 @@ interface DoctorOption {
   specialty: string
 }
 
-interface PatientOption {
-  id: number
-  name: string
-  email?: string
-}
-
 export default function LoginPage() {
   const navigate = useNavigate()
   const { login, isAuthenticated, role } = useAuth()
@@ -37,7 +31,7 @@ export default function LoginPage() {
   // Admin form state
   const [adminUsername, setAdminUsername] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
+  const [showAdminPassword, setShowAdminPassword] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [adminLoading, setAdminLoading] = useState(false)
 
@@ -47,11 +41,12 @@ export default function LoginPage() {
   const [doctorsLoading, setDoctorsLoading] = useState(false)
   const [doctorsError, setDoctorsError] = useState('')
 
-  // Patient selection state
-  const [patients, setPatients] = useState<PatientOption[]>([])
-  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null)
-  const [patientsLoading, setPatientsLoading] = useState(false)
-  const [patientsError, setPatientsError] = useState('')
+  // Patient login state
+  const [patientUsername, setPatientUsername] = useState('')
+  const [patientPassword, setPatientPassword] = useState('')
+  const [showPatientPassword, setShowPatientPassword] = useState(false)
+  const [patientError, setPatientError] = useState('')
+  const [patientLoading, setPatientLoading] = useState(false)
 
   // If already authenticated, redirect to appropriate portal
   useEffect(() => {
@@ -77,26 +72,6 @@ export default function LoginPage() {
           setDoctorsError('Could not load doctors. Please try again.')
         })
         .finally(() => setDoctorsLoading(false))
-    }
-  }, [selectedRole])
-
-  // Fetch patients when patient card is selected
-  useEffect(() => {
-    if (selectedRole === 'patient') {
-      setPatientsLoading(true)
-      setPatientsError('')
-      fetch(`${API_BASE_URL}/api/patients`)
-        .then((res) => {
-          if (!res.ok) throw new Error('Failed to fetch patients')
-          return res.json()
-        })
-        .then((data) => {
-          setPatients(Array.isArray(data) ? data : data.patients || [])
-        })
-        .catch(() => {
-          setPatientsError('Could not load patients. Please try again.')
-        })
-        .finally(() => setPatientsLoading(false))
     }
   }, [selectedRole])
 
@@ -145,17 +120,36 @@ export default function LoginPage() {
     navigate('/doctor')
   }
 
-  // Patient enter handler
-  const handlePatientEnter = () => {
-    const patient = patients.find((p) => p.id === selectedPatientId)
-    if (!patient) return
+  // Patient login handler
+  const handlePatientLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPatientError('')
+    setPatientLoading(true)
 
-    login({
-      role: 'patient',
-      user: patient,
-      patientId: patient.id,
-    })
-    navigate('/patient')
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/patient/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: patientUsername, password: patientPassword }),
+      })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.detail || 'Invalid username or password')
+      }
+
+      const data = await response.json()
+      login({
+        role: 'patient',
+        user: data.user,
+        patientId: data.user.id,
+      })
+      navigate('/patient')
+    } catch (err) {
+      setPatientError(err instanceof Error ? err.message : 'Login failed')
+    } finally {
+      setPatientLoading(false)
+    }
   }
 
   const roles = [
@@ -278,7 +272,7 @@ export default function LoginPage() {
                   <div className="relative">
                     <input
                       id="admin-password"
-                      type={showPassword ? 'text' : 'password'}
+                      type={showAdminPassword ? 'text' : 'password'}
                       value={adminPassword}
                       onChange={(e) => setAdminPassword(e.target.value)}
                       required
@@ -287,10 +281,10 @@ export default function LoginPage() {
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowAdminPassword(!showAdminPassword)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {showAdminPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
@@ -310,6 +304,9 @@ export default function LoginPage() {
                   {adminLoading ? 'Signing in...' : 'Sign In'}
                 </button>
               </form>
+              <p className="text-xs text-gray-400 mt-3 text-center">
+                Default: admin / admin123
+              </p>
             </div>
           )}
 
@@ -361,51 +358,73 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Patient Selection */}
+          {/* Patient Login Form */}
           {selectedRole === 'patient' && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center gap-2">
                 <User className="w-5 h-5 text-[#45BFD3]" />
-                Select Patient
+                Patient Login
               </h3>
-              {patientsLoading ? (
-                <div className="flex items-center justify-center py-8 text-gray-400">
-                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Loading patients...
+              <form onSubmit={handlePatientLogin} className="space-y-4">
+                <div>
+                  <label htmlFor="patient-username" className="block text-sm font-medium text-gray-700 mb-1">
+                    Username
+                  </label>
+                  <input
+                    id="patient-username"
+                    type="text"
+                    value={patientUsername}
+                    onChange={(e) => setPatientUsername(e.target.value)}
+                    required
+                    placeholder="Enter your username"
+                    className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all"
+                  />
                 </div>
-              ) : patientsError ? (
-                <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{patientsError}</p>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <label htmlFor="patient-select" className="block text-sm font-medium text-gray-700 mb-1">
-                      Patient
-                    </label>
-                    <select
-                      id="patient-select"
-                      value={selectedPatientId ?? ''}
-                      onChange={(e) => setSelectedPatientId(e.target.value ? Number(e.target.value) : null)}
-                      className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all"
+                <div>
+                  <label htmlFor="patient-password" className="block text-sm font-medium text-gray-700 mb-1">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="patient-password"
+                      type={showPatientPassword ? 'text' : 'password'}
+                      value={patientPassword}
+                      onChange={(e) => setPatientPassword(e.target.value)}
+                      required
+                      placeholder="Enter your password"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPatientPassword(!showPatientPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      <option value="">-- Choose a patient --</option>
-                      {patients.map((pat) => (
-                        <option key={pat.id} value={pat.id}>
-                          {pat.name} {pat.email ? `(${pat.email})` : ''}
-                        </option>
-                      ))}
-                    </select>
+                      {showPatientPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handlePatientEnter}
-                    disabled={!selectedPatientId}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors text-sm"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                    Enter Patient Portal
-                  </button>
                 </div>
-              )}
+                {patientError && (
+                  <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{patientError}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={patientLoading || !patientUsername || !patientPassword}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors text-sm"
+                >
+                  {patientLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <LogIn className="w-4 h-4" />
+                  )}
+                  {patientLoading ? 'Signing in...' : 'Sign In'}
+                </button>
+              </form>
+              <p className="text-xs text-gray-400 mt-3 text-center">
+                Default: maria / patient123
+              </p>
+              <p className="text-xs text-gray-400 mt-1 text-center">
+                Your clinic admin will provide your login credentials.
+              </p>
             </div>
           )}
         </div>

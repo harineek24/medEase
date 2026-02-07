@@ -45,6 +45,13 @@ def init_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 date_of_birth TEXT,
+                username TEXT UNIQUE,
+                password_hash TEXT,
+                email TEXT,
+                phone TEXT,
+                address TEXT,
+                emergency_contact TEXT,
+                is_active INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
@@ -713,8 +720,17 @@ def _seed_sample_data(cursor):
     # =========================================================================
     # Sample Patients
     # =========================================================================
-    patients = [
-        {"name": "Maria Garcia", "date_of_birth": "1985-03-14"},
+    import hashlib as _hl
+
+    # First patient gets login credentials (default test patient)
+    default_pw = _hl.sha256("patient123".encode()).hexdigest()
+    cursor.execute(
+        "INSERT INTO patients (name, date_of_birth, username, password_hash, email) VALUES (?, ?, ?, ?, ?)",
+        ("Maria Garcia", "1985-03-14", "maria", default_pw, "maria.garcia@email.com")
+    )
+
+    # Rest of the patients (no credentials yet - admin registers them later)
+    other_patients = [
         {"name": "James Wilson", "date_of_birth": "1972-07-22"},
         {"name": "Aisha Patel", "date_of_birth": "1990-11-05"},
         {"name": "Robert Chang", "date_of_birth": "1968-01-30"},
@@ -726,7 +742,7 @@ def _seed_sample_data(cursor):
         {"name": "Michael Johnson", "date_of_birth": "1965-02-28"},
     ]
 
-    for pt in patients:
+    for pt in other_patients:
         cursor.execute(
             "INSERT INTO patients (name, date_of_birth) VALUES (?, ?)",
             (pt["name"], pt["date_of_birth"])
@@ -1897,6 +1913,38 @@ def verify_admin_login(username: str, password: str) -> Optional[Dict]:
             )
             return dict(user)
         return None
+
+
+def verify_patient_login(username: str, password: str) -> Optional[Dict]:
+    """Verify patient login credentials."""
+    import hashlib
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, name, username, email, date_of_birth
+            FROM patients
+            WHERE username = ? AND password_hash = ? AND is_active = 1
+        """, (username, password_hash))
+        user = cursor.fetchone()
+        return dict(user) if user else None
+
+
+def register_patient(name: str, username: str, password: str,
+                     date_of_birth: str = None, email: str = None,
+                     phone: str = None, address: str = None) -> int:
+    """Register a new patient with login credentials (called by clinic admin)."""
+    import hashlib
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO patients (name, username, password_hash, date_of_birth, email, phone, address)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (name, username, password_hash, date_of_birth, email, phone, address))
+        return cursor.lastrowid
 
 
 def get_admin_user(user_id: int) -> Optional[Dict]:

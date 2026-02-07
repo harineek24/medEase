@@ -1536,6 +1536,78 @@ async def admin_login(request: AdminLoginRequest):
 
 
 # =============================================================================
+# Patient Authentication
+# =============================================================================
+
+class PatientLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/patient/login")
+async def patient_login(request: PatientLoginRequest):
+    """Patient login endpoint."""
+    try:
+        user = db.verify_patient_login(request.username, request.password)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+
+        return JSONResponse(content={
+            "success": True,
+            "user": user,
+            "message": "Login successful"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RegisterPatientRequest(BaseModel):
+    name: str
+    username: str
+    password: str
+    date_of_birth: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+
+
+@app.post("/api/clinicadmin/patients/register")
+async def clinicadmin_register_patient(request: RegisterPatientRequest):
+    """Register a new patient with login credentials (clinic admin only)."""
+    try:
+        # Check if username already taken
+        existing = None
+        with db.get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM patients WHERE username = ?", (request.username,))
+            existing = cursor.fetchone()
+
+        if existing:
+            raise HTTPException(status_code=400, detail="Username already taken")
+
+        patient_id = db.register_patient(
+            name=request.name,
+            username=request.username,
+            password=request.password,
+            date_of_birth=request.date_of_birth,
+            email=request.email,
+            phone=request.phone,
+            address=request.address
+        )
+        return JSONResponse(content={
+            "success": True,
+            "patient_id": patient_id,
+            "message": f"Patient {request.name} registered successfully. Credentials: username={request.username}"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Pydantic Models for New Endpoints
 # =============================================================================
 
