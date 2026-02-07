@@ -14,22 +14,22 @@ const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' 
         <ellipse cx="28" cy="10" rx="5" ry="3" fill="#1f2937" transform="rotate(-35 28 10)" />
         <ellipse cx="72" cy="10" rx="5" ry="3" fill="#1f2937" transform="rotate(35 72 10)" />
 
-        {/* Left tube - curves outward then inward, stops before center */}
+        {/* Left tube - curves outward then inward to center point */}
         <path
           d="M 28 12
              Q 18 0, 8 22
-             Q -2 48, 35 62"
+             Q -2 48, 50 60"
           stroke="#9ca3af"
           strokeWidth="3.5"
           strokeLinecap="round"
           fill="none"
         />
 
-        {/* Right tube - mirrors left, stops before center */}
+        {/* Right tube - mirrors left to center point */}
         <path
           d="M 72 12
              Q 82 0, 92 22
-             Q 102 48, 65 62"
+             Q 102 48, 50 60"
           stroke="#9ca3af"
           strokeWidth="3.5"
           strokeLinecap="round"
@@ -38,24 +38,14 @@ const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' 
 
         {/* Single dark stem from center down to chest piece */}
         <path
-          d="M 50 58
-             Q 50 75, 52 85
-             Q 55 100, 70 102"
+          d="M 50 60
+             Q 50 78, 52 88
+             Q 56 102, 70 104"
           stroke="#1f2937"
           strokeWidth="4.5"
           strokeLinecap="round"
           fill="none"
         />
-
-        {/* Junction piece connecting tubes to stem */}
-        <path
-          d="M 35 62 Q 50 70, 65 62"
-          stroke="#9ca3af"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          fill="none"
-        />
-        <circle cx="50" cy="62" r="4" fill="#9ca3af" />
 
         {/* Chest piece - oval with inner circle */}
         <ellipse cx="80" cy="102" rx="11" ry="9" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2" />
