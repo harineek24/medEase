@@ -441,11 +441,176 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
   const filterSummary = (summary: string): string => {
     const sections = summary.split(/(?=## )/g)
     const filtered = sections.filter(section => {
-      return !section.includes('## Quick Overview') &&
-             !section.includes('## Your Medications') &&
-             !section.includes('## Test Results')
+      // Get the heading line (first line of each section) and normalize it
+      const headingLine = section.split('\n')[0].toLowerCase()
+        .replace(/[^\w\s]/g, '') // strip emojis and special chars
+        .trim()
+      return !headingLine.includes('quick overview') &&
+             !headingLine.includes('your medications') &&
+             !headingLine.includes('test results') &&
+             !headingLine.includes('drug interaction')
     })
     return filtered.join('\n')
+  }
+
+  // Parse numeric value from test result strings like "120/80 mmHg", "72 bpm", "98%"
+  const parseNumeric = (val: string): number => {
+    const m = val.match(/[\d.]+/)
+    return m ? parseFloat(m[0]) : 0
+  }
+
+  // Render the health dashboard from extracted test results
+  const renderHealthView = () => {
+    if (testResults.length === 0) {
+      return (
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center max-w-md">
+            <div className="w-16 h-16 rounded-full bg-[#8BC34A]/10 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-[#8BC34A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-light text-gray-900 mb-2">Health Dashboard</h2>
+            <p className="text-gray-500 text-sm">Upload a medical document first to see your health metrics extracted and displayed here.</p>
+            <button
+              onClick={() => onNavigate('upload')}
+              className="mt-4 px-5 py-2.5 rounded-lg bg-[#45BFD3] text-white text-sm font-medium hover:bg-[#3dafc2] transition-colors"
+            >
+              Upload Document
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // Categorize test results into vital-like cards
+    const findResult = (keywords: string[]) =>
+      testResults.find(t => keywords.some(k => t.name.toLowerCase().includes(k)))
+
+    const bpResult = findResult(['blood pressure', 'bp', 'systolic'])
+    const hrResult = findResult(['heart rate', 'pulse', 'hr'])
+    const spo2Result = findResult(['oxygen', 'spo2', 'o2 sat', 'saturation'])
+    const tempResult = findResult(['temperature', 'temp'])
+    const respResult = findResult(['respiratory', 'breathing', 'resp rate'])
+    const glucoseResult = findResult(['glucose', 'blood sugar', 'hba1c', 'a1c'])
+
+    // All other results that don't match vital categories
+    const vitalNames = [bpResult, hrResult, spo2Result, tempResult, respResult, glucoseResult].filter(Boolean).map(r => r!.name)
+    const otherResults = testResults.filter(t => !vitalNames.includes(t.name))
+
+    const statusColor = (status: string) => {
+      if (status === 'normal') return 'bg-green-50 border-green-200 text-green-700'
+      if (status === 'borderline') return 'bg-yellow-50 border-yellow-200 text-yellow-700'
+      return 'bg-red-50 border-red-200 text-red-700'
+    }
+
+    const statusBadge = (status: string) => {
+      if (status === 'normal') return 'bg-green-100 text-green-700'
+      if (status === 'borderline') return 'bg-yellow-100 text-yellow-700'
+      return 'bg-red-100 text-red-700'
+    }
+
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-8">
+        <div className="flex items-center gap-3 mb-8">
+          <div className="w-10 h-10 rounded-full bg-[#8BC34A]/10 flex items-center justify-center">
+            <svg className="w-5 h-5 text-[#8BC34A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-2xl font-light text-gray-900">Health Dashboard</h2>
+            <p className="text-sm text-gray-400">Extracted from your latest document</p>
+          </div>
+        </div>
+
+        {/* Top vital cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+          {bpResult && (
+            <div className={`rounded-2xl border p-5 ${statusColor(bpResult.status)}`}>
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Blood Pressure</p>
+              <p className="text-3xl font-bold">{bpResult.value}</p>
+              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(bpResult.status)}`}>
+                {bpResult.status}
+              </span>
+            </div>
+          )}
+          {hrResult && (
+            <div className={`rounded-2xl border p-5 ${statusColor(hrResult.status)}`}>
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Heart Rate</p>
+              <p className="text-3xl font-bold">{parseNumeric(hrResult.value)} <span className="text-sm font-normal">bpm</span></p>
+              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(hrResult.status)}`}>
+                {hrResult.status}
+              </span>
+            </div>
+          )}
+          {spo2Result && (
+            <div className={`rounded-2xl border p-5 ${statusColor(spo2Result.status)}`}>
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Oxygen Level</p>
+              <p className="text-3xl font-bold">{spo2Result.value}</p>
+              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(spo2Result.status)}`}>
+                {spo2Result.status}
+              </span>
+            </div>
+          )}
+          {tempResult && (
+            <div className={`rounded-2xl border p-5 ${statusColor(tempResult.status)}`}>
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Temperature</p>
+              <p className="text-3xl font-bold">{tempResult.value}</p>
+              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(tempResult.status)}`}>
+                {tempResult.status}
+              </span>
+            </div>
+          )}
+          {respResult && (
+            <div className={`rounded-2xl border p-5 ${statusColor(respResult.status)}`}>
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Respiratory Rate</p>
+              <p className="text-3xl font-bold">{respResult.value}</p>
+              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(respResult.status)}`}>
+                {respResult.status}
+              </span>
+            </div>
+          )}
+          {glucoseResult && (
+            <div className={`rounded-2xl border p-5 ${statusColor(glucoseResult.status)}`}>
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Glucose</p>
+              <p className="text-3xl font-bold">{glucoseResult.value}</p>
+              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(glucoseResult.status)}`}>
+                {glucoseResult.status}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* All other test results */}
+        {otherResults.length > 0 && (
+          <div>
+            <h3 className="text-lg font-medium text-gray-800 mb-4">Lab Results</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {otherResults.map((test, i) => (
+                <div
+                  key={i}
+                  className={`rounded-xl border p-4 flex items-center justify-between ${statusColor(test.status)}`}
+                >
+                  <div>
+                    <p className="font-medium text-sm">{test.name}</p>
+                    {test.explanation && (
+                      <p className="text-xs opacity-70 mt-0.5">{test.explanation}</p>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold">{test.value}</p>
+                    <span className={`inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(test.status)}`}>
+                      {test.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
   }
 
   // Render the appropriate view
@@ -477,14 +642,7 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
         )
 
       case 'health':
-        return (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <div className="text-center">
-              <h2 className="text-2xl font-light text-gray-900 mb-2">Health</h2>
-              <p className="text-gray-500 text-sm">Your health tracking dashboard is coming soon.</p>
-            </div>
-          </div>
-        )
+        return renderHealthView()
 
       case 'upload':
       default:
