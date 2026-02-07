@@ -14,24 +14,22 @@ const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' 
         <ellipse cx="28" cy="10" rx="5" ry="3" fill="#1f2937" transform="rotate(-35 28 10)" />
         <ellipse cx="72" cy="10" rx="5" ry="3" fill="#1f2937" transform="rotate(35 72 10)" />
 
-        {/* Left tube - goes up, curves outward, then sweeps down and inward */}
+        {/* Left tube - curves outward then inward, stops before center */}
         <path
           d="M 28 12
-             Q 20 0, 10 20
-             Q 0 45, 30 60
-             Q 45 68, 50 60"
+             Q 18 0, 8 22
+             Q -2 48, 35 62"
           stroke="#9ca3af"
           strokeWidth="3.5"
           strokeLinecap="round"
           fill="none"
         />
 
-        {/* Right tube - mirrors left */}
+        {/* Right tube - mirrors left, stops before center */}
         <path
           d="M 72 12
-             Q 80 0, 90 20
-             Q 100 45, 70 60
-             Q 55 68, 50 60"
+             Q 82 0, 92 22
+             Q 102 48, 65 62"
           stroke="#9ca3af"
           strokeWidth="3.5"
           strokeLinecap="round"
@@ -40,7 +38,7 @@ const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' 
 
         {/* Single dark stem from center down to chest piece */}
         <path
-          d="M 50 60
+          d="M 50 58
              Q 50 75, 52 85
              Q 55 100, 70 102"
           stroke="#1f2937"
@@ -49,13 +47,23 @@ const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' 
           fill="none"
         />
 
+        {/* Junction piece connecting tubes to stem */}
+        <path
+          d="M 35 62 Q 50 70, 65 62"
+          stroke="#9ca3af"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          fill="none"
+        />
+        <circle cx="50" cy="62" r="4" fill="#9ca3af" />
+
         {/* Chest piece - oval with inner circle */}
         <ellipse cx="80" cy="102" rx="11" ry="9" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2" />
         <ellipse cx="80" cy="102" rx="5" ry="4" fill="#c9cdd1" />
       </svg>
 
       {/* Heart icon centered in the tube heart shape */}
-      <div className={`absolute top-[30%] left-1/2 -translate-x-1/2 -translate-y-1/2 ${isBeating ? 'animate-heartbeat' : ''}`}>
+      <div className={`absolute top-[28%] left-1/2 -translate-x-1/2 -translate-y-1/2 ${isBeating ? 'animate-heartbeat' : ''}`}>
         <svg viewBox="0 0 24 24" className="w-14 h-14" style={{ filter: isBeating ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none' }}>
           <path
             d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
