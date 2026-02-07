@@ -1335,6 +1335,36 @@ def add_test_result(
         return cursor.lastrowid
 
 
+def get_test_result_history(test_name: str) -> list:
+    """Get historical readings for a specific test across all summaries."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT tr.id, tr.test_name, tr.value, tr.unit, tr.status,
+                   tr.reference_range, tr.created_at,
+                   s.original_filename, s.visit_date
+            FROM test_results tr
+            JOIN summaries s ON s.id = tr.summary_id
+            WHERE LOWER(tr.test_name) LIKE LOWER(?)
+            ORDER BY tr.created_at ASC
+        """, (f"%{test_name}%",))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_all_test_names() -> list:
+    """Get all distinct test names stored in the database."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT test_name, status,
+                   MAX(created_at) as latest_at
+            FROM test_results
+            GROUP BY LOWER(test_name)
+            ORDER BY latest_at DESC
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+
+
 # =============================================================================
 # Drug Interaction Operations
 # =============================================================================

@@ -1,4 +1,4 @@
-import { useState, useRef, DragEvent, useEffect } from 'react'
+import { useState, useRef, DragEvent, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { API_BASE_URL } from './api'
 import './App.css'
@@ -110,6 +110,13 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
   const [filteredSummary, setFilteredSummary] = useState<string>('')
   const [interactions, setInteractions] = useState<DrugInteraction[]>([])
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+  // Health dashboard chart state
+  const [selectedHealthCard, setSelectedHealthCard] = useState<string | null>(null)
+  const [chartData, setChartData] = useState<Array<{value: number; date: string; filename?: string}>>([])
+  const [chartLoading, setChartLoading] = useState(false)
+  type HealthTimeRange = '1d' | '1w' | '1m' | '1y' | 'all'
+  const [healthTimeRange, setHealthTimeRange] = useState<HealthTimeRange>('all')
 
   // File validation
   const validateFile = (file: File): string | null => {
@@ -459,6 +466,43 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
     return m ? parseFloat(m[0]) : 0
   }
 
+  // Fetch chart history when a card is clicked
+  const fetchChartHistory = useCallback(async (testName: string) => {
+    setSelectedHealthCard(testName)
+    setChartLoading(true)
+    setHealthTimeRange('all')
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/test-results/history/${encodeURIComponent(testName)}`)
+      if (res.ok) {
+        const data = await res.json()
+        const parsed = data.map((d: { value: string; created_at: string; original_filename?: string }) => ({
+          value: parseNumeric(d.value || '0'),
+          date: d.created_at,
+          filename: d.original_filename
+        }))
+        setChartData(parsed)
+      }
+    } catch (err) {
+      console.error('Error fetching chart history:', err)
+    } finally {
+      setChartLoading(false)
+    }
+  }, [])
+
+  // Filter chart data by time range
+  const getFilteredChartData = useCallback(() => {
+    if (healthTimeRange === 'all') return chartData
+    const now = Date.now()
+    const msMap: Record<string, number> = {
+      '1d': 86_400_000,
+      '1w': 604_800_000,
+      '1m': 2_592_000_000,
+      '1y': 31_536_000_000,
+    }
+    const cutoff = now - (msMap[healthTimeRange] || 0)
+    return chartData.filter(d => new Date(d.date).getTime() >= cutoff)
+  }, [chartData, healthTimeRange])
+
   // Render the health dashboard from extracted test results
   const renderHealthView = () => {
     if (testResults.length === 0) {
@@ -483,21 +527,6 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
       )
     }
 
-    // Categorize test results into vital-like cards
-    const findResult = (keywords: string[]) =>
-      testResults.find(t => keywords.some(k => t.name.toLowerCase().includes(k)))
-
-    const bpResult = findResult(['blood pressure', 'bp', 'systolic'])
-    const hrResult = findResult(['heart rate', 'pulse', 'hr'])
-    const spo2Result = findResult(['oxygen', 'spo2', 'o2 sat', 'saturation'])
-    const tempResult = findResult(['temperature', 'temp'])
-    const respResult = findResult(['respiratory', 'breathing', 'resp rate'])
-    const glucoseResult = findResult(['glucose', 'blood sugar', 'hba1c', 'a1c'])
-
-    // All other results that don't match vital categories
-    const vitalNames = [bpResult, hrResult, spo2Result, tempResult, respResult, glucoseResult].filter(Boolean).map(r => r!.name)
-    const otherResults = testResults.filter(t => !vitalNames.includes(t.name))
-
     const statusColor = (status: string) => {
       if (status === 'normal') return 'bg-green-50 border-green-200 text-green-700'
       if (status === 'borderline') return 'bg-yellow-50 border-yellow-200 text-yellow-700'
@@ -509,6 +538,54 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
       if (status === 'borderline') return 'bg-yellow-100 text-yellow-700'
       return 'bg-red-100 text-red-700'
     }
+
+    // Split into "vitals" (top row) and "lab results" (bottom grid)
+    const vitalKeywords = ['blood pressure', 'bp', 'systolic', 'heart rate', 'pulse', 'oxygen', 'spo2', 'temperature', 'temp', 'respiratory', 'glucose', 'blood sugar']
+    const vitalResults = testResults.filter(t => vitalKeywords.some(k => t.name.toLowerCase().includes(k)))
+    const labResults = testResults.filter(t => !vitalKeywords.some(k => t.name.toLowerCase().includes(k)))
+
+    // Chart rendering
+    const filteredChart = getFilteredChartData()
+    const chartValues = filteredChart.map(d => d.value)
+    const chartMin = chartValues.length > 0 ? Math.min(...chartValues) : 0
+    const chartMax = chartValues.length > 0 ? Math.max(...chartValues) : 0
+    const chartAvg = chartValues.length > 0 ? Math.round((chartValues.reduce((a, b) => a + b, 0) / chartValues.length) * 10) / 10 : 0
+    const chartRange = chartMax - chartMin || 1
+
+    const timeRangeLabels: Record<string, string> = { '1d': '1 day', '1w': '1 week', '1m': '1 month', '1y': '1 year', all: 'All' }
+
+    // SVG chart dimensions
+    const svgW = 520, svgH = 200
+    const pad = { top: 20, right: 20, bottom: 30, left: 45 }
+    const innerW = svgW - pad.left - pad.right
+    const innerH = svgH - pad.top - pad.bottom
+
+    const chartPoints = filteredChart.map((d, i) => ({
+      x: pad.left + (filteredChart.length > 1 ? (i / (filteredChart.length - 1)) * innerW : innerW / 2),
+      y: pad.top + innerH - ((d.value - chartMin) / chartRange) * innerH,
+      d,
+    }))
+
+    const linePath = chartPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+
+    // Area fill path (line + close to bottom)
+    const areaPath = chartPoints.length > 0
+      ? linePath + ` L${chartPoints[chartPoints.length - 1].x},${pad.top + innerH} L${chartPoints[0].x},${pad.top + innerH} Z`
+      : ''
+
+    // Y-axis ticks
+    const yTickCount = 5
+    const yTicks = Array.from({ length: yTickCount }, (_, i) =>
+      Math.round((chartMin + (chartRange * i) / (yTickCount - 1)) * 10) / 10
+    )
+
+    // X-axis labels
+    const xLabelCount = Math.min(5, filteredChart.length)
+    const xLabels = xLabelCount > 0 ? Array.from({ length: xLabelCount }, (_, i) => {
+      const idx = Math.round((i / Math.max(xLabelCount - 1, 1)) * (filteredChart.length - 1))
+      const d = new Date(filteredChart[idx].date)
+      return { label: `${d.getMonth() + 1}/${d.getDate()}`, x: chartPoints[idx].x }
+    }) : []
 
     return (
       <div className="max-w-5xl mx-auto px-4 py-8">
@@ -524,73 +601,167 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
           </div>
         </div>
 
-        {/* Top vital cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
-          {bpResult && (
-            <div className={`rounded-2xl border p-5 ${statusColor(bpResult.status)}`}>
-              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Blood Pressure</p>
-              <p className="text-3xl font-bold">{bpResult.value}</p>
-              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(bpResult.status)}`}>
-                {bpResult.status}
-              </span>
-            </div>
-          )}
-          {hrResult && (
-            <div className={`rounded-2xl border p-5 ${statusColor(hrResult.status)}`}>
-              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Heart Rate</p>
-              <p className="text-3xl font-bold">{parseNumeric(hrResult.value)} <span className="text-sm font-normal">bpm</span></p>
-              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(hrResult.status)}`}>
-                {hrResult.status}
-              </span>
-            </div>
-          )}
-          {spo2Result && (
-            <div className={`rounded-2xl border p-5 ${statusColor(spo2Result.status)}`}>
-              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Oxygen Level</p>
-              <p className="text-3xl font-bold">{spo2Result.value}</p>
-              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(spo2Result.status)}`}>
-                {spo2Result.status}
-              </span>
-            </div>
-          )}
-          {tempResult && (
-            <div className={`rounded-2xl border p-5 ${statusColor(tempResult.status)}`}>
-              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Temperature</p>
-              <p className="text-3xl font-bold">{tempResult.value}</p>
-              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(tempResult.status)}`}>
-                {tempResult.status}
-              </span>
-            </div>
-          )}
-          {respResult && (
-            <div className={`rounded-2xl border p-5 ${statusColor(respResult.status)}`}>
-              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Respiratory Rate</p>
-              <p className="text-3xl font-bold">{respResult.value}</p>
-              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(respResult.status)}`}>
-                {respResult.status}
-              </span>
-            </div>
-          )}
-          {glucoseResult && (
-            <div className={`rounded-2xl border p-5 ${statusColor(glucoseResult.status)}`}>
-              <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">Glucose</p>
-              <p className="text-3xl font-bold">{glucoseResult.value}</p>
-              <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(glucoseResult.status)}`}>
-                {glucoseResult.status}
-              </span>
-            </div>
-          )}
-        </div>
+        {/* Vital cards row - clickable */}
+        {vitalResults.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+            {vitalResults.map((test, i) => (
+              <div
+                key={i}
+                onClick={() => fetchChartHistory(test.name)}
+                className={`rounded-2xl border p-5 cursor-pointer transition-all duration-200 hover:shadow-md hover:scale-[1.02] ${
+                  selectedHealthCard === test.name ? 'ring-2 ring-[#8BC34A] shadow-md' : ''
+                } ${statusColor(test.status)}`}
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">{test.name}</p>
+                <p className="text-3xl font-bold">{test.value}</p>
+                <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(test.status)}`}>
+                  {test.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
 
-        {/* All other test results */}
-        {otherResults.length > 0 && (
+        {/* Expanded chart panel */}
+        {selectedHealthCard && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-8">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-xl font-semibold text-gray-900">{selectedHealthCard}</h3>
+                <p className="text-sm text-gray-400">
+                  {filteredChart.length} reading{filteredChart.length !== 1 ? 's' : ''} across uploads
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedHealthCard(null)}
+                className="text-gray-400 hover:text-gray-600 text-xl font-light"
+              >
+                x
+              </button>
+            </div>
+
+            {/* Time range filter pills */}
+            <div className="flex gap-2 mb-5 flex-wrap">
+              {(Object.keys(timeRangeLabels) as HealthTimeRange[]).map(key => (
+                <button
+                  key={key}
+                  onClick={() => setHealthTimeRange(key)}
+                  className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    healthTimeRange === key
+                      ? 'bg-[#8BC34A] text-white'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
+                >
+                  {timeRangeLabels[key]}
+                </button>
+              ))}
+            </div>
+
+            {chartLoading ? (
+              <div className="flex items-center justify-center h-52">
+                <div className="h-8 w-8 rounded-full border-3 border-[#8BC34A] border-t-transparent animate-spin" />
+              </div>
+            ) : filteredChart.length === 0 ? (
+              <div className="flex items-center justify-center h-52 text-gray-400 text-sm">
+                No data for this time range.
+              </div>
+            ) : (
+              <>
+                {/* SVG Chart */}
+                <div className="bg-gray-50 rounded-xl p-3 mb-5">
+                  <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-auto">
+                    {/* Grid lines */}
+                    {yTicks.map(val => {
+                      const y = pad.top + innerH - ((val - chartMin) / chartRange) * innerH
+                      return (
+                        <g key={val}>
+                          <line x1={pad.left} x2={svgW - pad.right} y1={y} y2={y} stroke="#e5e7eb" strokeDasharray="4 2" />
+                          <text x={pad.left - 6} y={y + 4} textAnchor="end" className="text-[10px] fill-gray-400">{val}</text>
+                        </g>
+                      )
+                    })}
+
+                    {/* X-axis labels */}
+                    {xLabels.map((lbl, i) => (
+                      <text key={i} x={lbl.x} y={svgH - 6} textAnchor="middle" className="text-[9px] fill-gray-400">{lbl.label}</text>
+                    ))}
+
+                    {/* Area fill */}
+                    <path d={areaPath} fill="url(#healthGrad)" />
+                    <defs>
+                      <linearGradient id="healthGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#8BC34A" stopOpacity="0.3" />
+                        <stop offset="100%" stopColor="#8BC34A" stopOpacity="0.02" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Line */}
+                    <path d={linePath} fill="none" stroke="#8BC34A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+
+                    {/* Data points */}
+                    {chartPoints.map((p, i) => (
+                      <g key={i}>
+                        <circle cx={p.x} cy={p.y} r={4} fill="#8BC34A" stroke="#fff" strokeWidth={2} />
+                        {/* Value label on hover-visible points (show all if < 10 pts) */}
+                        {filteredChart.length <= 10 && (
+                          <text x={p.x} y={p.y - 10} textAnchor="middle" className="text-[9px] fill-gray-600 font-semibold">
+                            {p.d.value}
+                          </text>
+                        )}
+                      </g>
+                    ))}
+
+                    {/* Min / Max annotations if enough data */}
+                    {filteredChart.length > 1 && (() => {
+                      const minPt = chartPoints.reduce((a, b) => a.d.value < b.d.value ? a : b)
+                      const maxPt = chartPoints.reduce((a, b) => a.d.value > b.d.value ? a : b)
+                      return (
+                        <>
+                          {filteredChart.length > 10 && (
+                            <>
+                              <text x={minPt.x} y={minPt.y + 16} textAnchor="middle" className="text-[9px] fill-[#e57373] font-semibold">Min {chartMin}</text>
+                              <text x={maxPt.x} y={maxPt.y - 12} textAnchor="middle" className="text-[9px] fill-[#8BC34A] font-semibold">Max {chartMax}</text>
+                            </>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </svg>
+                </div>
+
+                {/* Stats row */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-xl bg-[#8BC34A]/10 p-4 text-center">
+                    <p className="text-xs text-[#6a9a2e] font-semibold uppercase tracking-wide">Max</p>
+                    <p className="text-2xl font-bold text-[#6a9a2e]">{chartMax}</p>
+                  </div>
+                  <div className="rounded-xl bg-[#8BC34A]/10 p-4 text-center">
+                    <p className="text-xs text-[#6a9a2e] font-semibold uppercase tracking-wide">Min</p>
+                    <p className="text-2xl font-bold text-[#6a9a2e]">{chartMin}</p>
+                  </div>
+                  <div className="rounded-xl bg-gray-100 p-4 text-center">
+                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Avg</p>
+                    <p className="text-2xl font-bold text-gray-700">{chartAvg}</p>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Lab Results section - also clickable */}
+        {labResults.length > 0 && (
           <div>
             <h3 className="text-lg font-medium text-gray-800 mb-4">Lab Results</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {otherResults.map((test, i) => (
+              {labResults.map((test, i) => (
                 <div
                   key={i}
-                  className={`rounded-xl border p-4 flex items-center justify-between ${statusColor(test.status)}`}
+                  onClick={() => fetchChartHistory(test.name)}
+                  className={`rounded-xl border p-4 flex items-center justify-between cursor-pointer transition-all duration-200 hover:shadow-md ${
+                    selectedHealthCard === test.name ? 'ring-2 ring-[#8BC34A] shadow-md' : ''
+                  } ${statusColor(test.status)}`}
                 >
                   <div>
                     <p className="font-medium text-sm">{test.name}</p>

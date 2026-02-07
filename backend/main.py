@@ -2196,6 +2196,26 @@ async def portal_patient_insurance(patient_id: int):
         raise HTTPException(status_code=500, detail=f"Error getting insurance: {str(e)}")
 
 
+@app.get("/api/test-results/history/{test_name}")
+async def get_test_history(test_name: str):
+    """Get historical readings for a specific test result across all uploads."""
+    try:
+        history = db.get_test_result_history(test_name)
+        return JSONResponse(content=history)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching test history: {str(e)}")
+
+
+@app.get("/api/test-results/names")
+async def get_test_names():
+    """Get all distinct test result names stored."""
+    try:
+        names = db.get_all_test_names()
+        return JSONResponse(content=names)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching test names: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
