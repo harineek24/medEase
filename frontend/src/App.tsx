@@ -1,4 +1,4 @@
-import { useState, DragEvent, useEffect } from 'react'
+import { useState, useRef, DragEvent, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { API_BASE_URL } from './api'
 import './App.css'
@@ -91,6 +91,7 @@ function App() {
   const [error, setError] = useState<string>('')
   const [fileName, setFileName] = useState<string>('')
   const [dragActive, setDragActive] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [medications, setMedications] = useState<Medication[]>([])
   const [selectedMedication, setSelectedMedication] = useState<string | null>(null)
   const [medicationDetails, setMedicationDetails] = useState<MedicationDetails | null>(null)
@@ -492,14 +493,18 @@ function App() {
                       Drop your medical document here
                     </h3>
                     <p className="text-gray-500 text-sm mb-4">or</p>
-                    <label
-                      htmlFor="file-input"
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        fileInputRef.current?.click()
+                      }}
                       className="px-6 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] text-white font-medium rounded-lg transition-all duration-200 cursor-pointer"
                     >
                       Choose File
-                    </label>
+                    </button>
                     <input
-                      id="file-input"
+                      ref={fileInputRef}
                       type="file"
                       accept=".pdf,.png,.jpg,.jpeg"
                       onChange={handleFileInput}
@@ -532,12 +537,12 @@ function App() {
 
           {/* Blur effects */}
           <BlurEffect
-            className="absolute bg-gradient-to-b from-transparent to-white/20 h-1/3 w-full bottom-0 z-10"
+            className="absolute bg-gradient-to-b from-transparent to-white/20 h-1/3 w-full bottom-0 z-10 pointer-events-none"
             position="bottom"
             intensity={50}
           />
           <BlurEffect
-            className="absolute bg-gradient-to-b from-white/20 to-transparent h-1/3 w-full top-0 z-10"
+            className="absolute bg-gradient-to-b from-white/20 to-transparent h-1/3 w-full top-0 z-10 pointer-events-none"
             position="top"
             intensity={50}
           />
@@ -572,7 +577,7 @@ function App() {
             </div>
           </div>
           <BlurEffect
-            className="absolute bg-gradient-to-b from-transparent to-white/20 h-1/3 w-full bottom-0 z-10"
+            className="absolute bg-gradient-to-b from-transparent to-white/20 h-1/3 w-full bottom-0 z-10 pointer-events-none"
             position="bottom"
             intensity={50}
           />

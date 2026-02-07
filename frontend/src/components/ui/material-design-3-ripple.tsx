@@ -259,7 +259,7 @@ const Ripple = forwardRef<HTMLDivElement, RippleProps>(
         {...props}
       >
         {children && (
-            <div className="relative z-10 pointer-events-none">
+            <div className="relative z-10 pointer-events-auto">
                 {children}
             </div>
         )}
