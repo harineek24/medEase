@@ -10,48 +10,53 @@ const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' 
   return (
     <div className="relative w-48 h-56 flex items-center justify-center">
       <svg viewBox="0 0 100 120" className="w-full h-full" fill="none">
-        {/* Ear pieces */}
-        <ellipse cx="25" cy="8" rx="6" ry="4" fill="#1f2937" />
-        <ellipse cx="75" cy="8" rx="6" ry="4" fill="#1f2937" />
+        {/* Ear pieces - small dark ovals angled outward */}
+        <ellipse cx="28" cy="10" rx="5" ry="3" fill="#1f2937" transform="rotate(-35 28 10)" />
+        <ellipse cx="72" cy="10" rx="5" ry="3" fill="#1f2937" transform="rotate(35 72 10)" />
 
-        {/* Ear piece connectors */}
-        <rect x="23" y="10" width="4" height="6" fill="#9ca3af" rx="1" />
-        <rect x="73" y="10" width="4" height="6" fill="#9ca3af" rx="1" />
-
-        {/* Stethoscope tube - left side curving inward to form heart shape */}
+        {/* Left tube - goes up, curves outward, then sweeps down and inward */}
         <path
-          d="M 25 16 C 25 30 15 35 15 50 C 15 65 35 70 50 55"
+          d="M 28 12
+             Q 20 0, 10 20
+             Q 0 45, 30 60
+             Q 45 68, 50 60"
           stroke="#9ca3af"
-          strokeWidth="3"
-          strokeLinecap="round"
-          fill="none"
-        />
-        {/* Stethoscope tube - right side curving inward to form heart shape */}
-        <path
-          d="M 75 16 C 75 30 85 35 85 50 C 85 65 65 70 50 55"
-          stroke="#9ca3af"
-          strokeWidth="3"
+          strokeWidth="3.5"
           strokeLinecap="round"
           fill="none"
         />
 
-        {/* Stem going down to chest piece */}
+        {/* Right tube - mirrors left */}
         <path
-          d="M 50 55 C 50 70 45 80 45 90 C 45 100 55 105 60 100"
+          d="M 72 12
+             Q 80 0, 90 20
+             Q 100 45, 70 60
+             Q 55 68, 50 60"
+          stroke="#9ca3af"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          fill="none"
+        />
+
+        {/* Single dark stem from center down to chest piece */}
+        <path
+          d="M 50 60
+             Q 50 75, 52 85
+             Q 55 100, 70 102"
           stroke="#1f2937"
-          strokeWidth="4"
+          strokeWidth="4.5"
           strokeLinecap="round"
           fill="none"
         />
 
-        {/* Chest piece */}
-        <ellipse cx="68" cy="105" rx="12" ry="8" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2" />
-        <ellipse cx="68" cy="105" rx="6" ry="4" fill="#d1d5db" />
+        {/* Chest piece - oval with inner circle */}
+        <ellipse cx="80" cy="102" rx="11" ry="9" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2" />
+        <ellipse cx="80" cy="102" rx="5" ry="4" fill="#c9cdd1" />
       </svg>
 
-      {/* Heart in the center of the tube heart shape */}
-      <div className={`absolute top-[32%] left-1/2 -translate-x-1/2 -translate-y-1/2 ${isBeating ? 'animate-heartbeat' : ''}`}>
-        <svg viewBox="0 0 24 24" className="w-16 h-16" style={{ filter: isBeating ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none' }}>
+      {/* Heart icon centered in the tube heart shape */}
+      <div className={`absolute top-[30%] left-1/2 -translate-x-1/2 -translate-y-1/2 ${isBeating ? 'animate-heartbeat' : ''}`}>
+        <svg viewBox="0 0 24 24" className="w-14 h-14" style={{ filter: isBeating ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none' }}>
           <path
             d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
             fill={heartColor}
