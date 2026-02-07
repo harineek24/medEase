@@ -148,6 +148,29 @@ function App() {
       const data: SummaryData = await response.json()
       setSummaryData(data)
       setAppState('results')
+
+      // Auto-save to database for Dashboard/History
+      try {
+        await fetch(`${API_BASE_URL}/api/save-summary`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            patient_name: data.patient_name || 'Unknown Patient',
+            raw_summary: data.summary,
+            file_path: data.markdown_path,
+            original_filename: file.name,
+            diagnosis: '',
+            visit_date: null,
+            visit_location: null,
+            medications: [],
+            test_results: [],
+            interactions: []
+          }),
+        })
+        setSaveStatus('saved')
+      } catch {
+        // Silent fail for auto-save — user can still manually save later
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while processing the file')
       setAppState('upload')
