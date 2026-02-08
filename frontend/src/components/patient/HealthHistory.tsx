@@ -94,6 +94,27 @@ const iconFor = (name: string) => {
 const vitalKeywords = ['blood pressure', 'bp', 'systolic', 'diastolic', 'heart rate', 'pulse', 'oxygen', 'spo2', 'temperature', 'temp', 'respiratory', 'glucose', 'blood sugar']
 const isVital = (name: string) => vitalKeywords.some(k => name.toLowerCase().includes(k))
 
+/** Parse reference range strings like "70-100", "4.0-5.6%", "<200", ">60", "70 - 100 mg/dL" */
+const parseReferenceRange = (ref: string | null): { low: number | null; high: number | null } | null => {
+  if (!ref) return null
+  // Match "X-Y" or "X - Y" pattern (most common)
+  const rangeMatch = ref.match(/([\d.]+)\s*[-–—]\s*([\d.]+)/)
+  if (rangeMatch) {
+    return { low: parseFloat(rangeMatch[1]), high: parseFloat(rangeMatch[2]) }
+  }
+  // Match "<X" or "< X"
+  const ltMatch = ref.match(/<\s*([\d.]+)/)
+  if (ltMatch) {
+    return { low: null, high: parseFloat(ltMatch[1]) }
+  }
+  // Match ">X" or "> X"
+  const gtMatch = ref.match(/>\s*([\d.]+)/)
+  if (gtMatch) {
+    return { low: parseFloat(gtMatch[1]), high: null }
+  }
+  return null
+}
+
 /** Color classes based on test status */
 const statusStyles = (status: string) => {
   if (status === 'normal') return {
@@ -335,15 +356,32 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     const latestUnit = latest?.unit || ''
     const Icon = iconFor(selectedTest)
 
+    // Extract reference range from the history data
+    const historyPoints = historyCache[selectedTest] || []
+    const refRangeStr = historyPoints.find(p => p.reference_range)?.reference_range || null
+    const refRange = parseReferenceRange(refRangeStr)
+
+    // Expand chart min/max to include reference range
+    let yMin = chartStats.min
+    let yMax = chartStats.max
+    if (refRange) {
+      if (refRange.low !== null) yMin = Math.min(yMin, refRange.low)
+      if (refRange.high !== null) yMax = Math.max(yMax, refRange.high)
+    }
+    // Add a small padding so the range band isn't at the very edge
+    const yPad = (yMax - yMin) * 0.08
+    yMin = Math.floor((yMin - yPad) * 10) / 10
+    yMax = Math.ceil((yMax + yPad) * 10) / 10
+
     const svgW = 540, svgH = 220
     const pad = { top: 24, right: 24, bottom: 34, left: 50 }
     const innerW = svgW - pad.left - pad.right
     const innerH = svgH - pad.top - pad.bottom
-    const range = chartStats.max - chartStats.min || 1
+    const range = yMax - yMin || 1
 
     const chartPoints = filteredChart.map((d, i) => ({
       x: pad.left + (filteredChart.length > 1 ? (i / (filteredChart.length - 1)) * innerW : innerW / 2),
-      y: pad.top + innerH - ((d.value - chartStats.min) / range) * innerH,
+      y: pad.top + innerH - ((d.value - yMin) / range) * innerH,
       d,
     }))
     const linePath = chartPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
@@ -353,7 +391,7 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
 
     const yTickCount = 5
     const yTicks = Array.from({ length: yTickCount }, (_, i) =>
-      Math.round((chartStats.min + (range * i) / (yTickCount - 1)) * 10) / 10
+      Math.round((yMin + (range * i) / (yTickCount - 1)) * 10) / 10
     )
     const xLabelCount = Math.min(5, filteredChart.length)
     const xLabels = xLabelCount > 0 ? Array.from({ length: xLabelCount }, (_, i) => {
@@ -414,7 +452,7 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-6">
             <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-auto">
               {yTicks.map(val => {
-                const y = pad.top + innerH - ((val - chartStats.min) / range) * innerH
+                const y = pad.top + innerH - ((val - yMin) / range) * innerH
                 return (
                   <g key={val}>
                     <line x1={pad.left} x2={svgW - pad.right} y1={y} y2={y} stroke="#f0f0f0" strokeDasharray="4 2" />
@@ -425,6 +463,36 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
               {xLabels.map((lbl, i) => (
                 <text key={i} x={lbl.x} y={svgH - 8} textAnchor="middle" className="text-[9px] fill-gray-400">{lbl.label}</text>
               ))}
+
+              {/* Normal range band */}
+              {refRange && (() => {
+                const bandLow = refRange.low !== null ? refRange.low : yMin
+                const bandHigh = refRange.high !== null ? refRange.high : yMax
+                const bandY1 = pad.top + innerH - ((bandHigh - yMin) / range) * innerH
+                const bandY2 = pad.top + innerH - ((bandLow - yMin) / range) * innerH
+                return (
+                  <g>
+                    <rect
+                      x={pad.left}
+                      y={bandY1}
+                      width={innerW}
+                      height={bandY2 - bandY1}
+                      fill="#8BC34A"
+                      fillOpacity={0.08}
+                      rx={4}
+                    />
+                    <line x1={pad.left} x2={svgW - pad.right} y1={bandY1} y2={bandY1} stroke="#8BC34A" strokeOpacity={0.3} strokeDasharray="6 3" />
+                    <line x1={pad.left} x2={svgW - pad.right} y1={bandY2} y2={bandY2} stroke="#8BC34A" strokeOpacity={0.3} strokeDasharray="6 3" />
+                    {refRange.high !== null && (
+                      <text x={svgW - pad.right + 4} y={bandY1 + 4} className="text-[8px] fill-[#8BC34A] font-medium">{refRange.high}</text>
+                    )}
+                    {refRange.low !== null && (
+                      <text x={svgW - pad.right + 4} y={bandY2 + 4} className="text-[8px] fill-[#8BC34A] font-medium">{refRange.low}</text>
+                    )}
+                  </g>
+                )
+              })()}
+
               <defs>
                 <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#8BC34A" stopOpacity="0.25" />
@@ -459,6 +527,15 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
                   </>
                 )
               })()}
+              {/* Legend */}
+              {refRange && (
+                <g>
+                  <rect x={pad.left} y={svgH - 14} width={8} height={8} rx={2} fill="#8BC34A" fillOpacity={0.15} stroke="#8BC34A" strokeOpacity={0.4} strokeWidth={0.5} />
+                  <text x={pad.left + 12} y={svgH - 7} className="text-[8px] fill-gray-500">
+                    Normal range{refRangeStr ? ` (${refRangeStr})` : ''}
+                  </text>
+                </g>
+              )}
             </svg>
           </div>
         )}
