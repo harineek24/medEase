@@ -115,6 +115,80 @@ const parseReferenceRange = (ref: string | null): { low: number | null; high: nu
   return null
 }
 
+/** Google-sourced estimated normal ranges for common lab tests */
+const GOOGLE_RANGES: Record<string, string> = {
+  // CBC
+  'wbc': '4.5-11.0 x10^9/L',
+  'rbc': '4.7-6.1 x10^12/L',
+  'hemoglobin': '12.0-17.5 g/dL',
+  'hematocrit': '36-54%',
+  'platelets': '150-400 x10^9/L',
+  // BMP
+  'sodium': '136-145 mmol/L',
+  'potassium': '3.5-5.0 mmol/L',
+  'chloride': '98-106 mmol/L',
+  'bicarbonate': '23-29 mmol/L',
+  'bun': '7-20 mg/dL',
+  'creatinine': '0.7-1.3 mg/dL',
+  'glucose': '70-100 mg/dL',
+  'blood sugar': '70-100 mg/dL',
+  'fasting glucose': '70-100 mg/dL',
+  // Lipid panel
+  'total cholesterol': '< 200 mg/dL',
+  'cholesterol': '< 200 mg/dL',
+  'triglycerides': '< 150 mg/dL',
+  'hdl': '> 40 mg/dL',
+  'hdl cholesterol': '> 40 mg/dL',
+  'ldl': '< 100 mg/dL',
+  'ldl cholesterol': '< 100 mg/dL',
+  // A1C
+  'hba1c': '4.0-5.6%',
+  'hemoglobin a1c': '4.0-5.6%',
+  'a1c': '4.0-5.6%',
+  // Cardiac
+  'troponin': '< 0.04 ng/mL',
+  'troponin i': '< 0.04 ng/mL',
+  'troponin t': '< 0.01 ng/mL',
+  'bnp': '< 100 pg/mL',
+  'crp': '< 3.0 mg/L',
+  'hs-crp': '< 2.0 mg/L',
+  // Thyroid
+  'tsh': '0.4-4.0 mIU/L',
+  't3': '80-200 ng/dL',
+  't4': '5.0-12.0 mcg/dL',
+  'free t4': '0.8-1.8 ng/dL',
+  // Liver
+  'alt': '7-56 U/L',
+  'ast': '10-40 U/L',
+  'alp': '44-147 U/L',
+  'bilirubin': '0.1-1.2 mg/dL',
+  'albumin': '3.5-5.5 g/dL',
+  // Kidney
+  'gfr': '> 60 mL/min',
+  'egfr': '> 60 mL/min',
+  // Iron
+  'iron': '60-170 mcg/dL',
+  'ferritin': '12-300 ng/mL',
+  // Vitamins
+  'vitamin d': '30-100 ng/mL',
+  'vitamin b12': '200-900 pg/mL',
+  // Blood pressure
+  'blood pressure': '< 120/80 mmHg',
+  'systolic': '< 120 mmHg',
+  'diastolic': '< 80 mmHg',
+}
+
+const getGoogleRange = (testName: string): string | null => {
+  const lower = testName.toLowerCase().trim()
+  // Direct match
+  if (GOOGLE_RANGES[lower]) return GOOGLE_RANGES[lower]
+  // Partial match
+  for (const [key, val] of Object.entries(GOOGLE_RANGES)) {
+    if (lower.includes(key) || key.includes(lower)) return val
+  }
+  return null
+}
+
 /** Color classes based on test status */
 const statusStyles = (status: string) => {
   if (status === 'normal') return {
@@ -482,45 +556,48 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
                 <text key={i} x={lbl.x} y={svgH - 8} textAnchor="middle" className="text-[9px] fill-gray-400">{lbl.label}</text>
               ))}
 
-              {/* Normal range band */}
+              {/* Normal range visualization */}
               {refRange && (() => {
-                const bandLow = refRange.low !== null ? refRange.low : yMin
-                const bandHigh = refRange.high !== null ? refRange.high : yMax
-                const bandY1 = pad.top + innerH - ((bandHigh - yMin) / range) * innerH
-                const bandY2 = pad.top + innerH - ((bandLow - yMin) / range) * innerH
-                const bandHeight = Math.max(bandY2 - bandY1, 1)
-                const bandMidY = bandY1 + bandHeight / 2
-                return (
-                  <g>
-                    <rect
-                      x={pad.left}
-                      y={bandY1}
-                      width={innerW}
-                      height={bandHeight}
-                      fill="#8BC34A"
-                      fillOpacity={0.1}
-                      rx={4}
-                    />
-                    {/* Boundary lines */}
-                    {refRange.high !== null && (
-                      <line x1={pad.left} x2={svgW - pad.right} y1={bandY1} y2={bandY1} stroke="#8BC34A" strokeOpacity={0.4} strokeDasharray="6 3" />
-                    )}
-                    {refRange.low !== null && (
-                      <line x1={pad.left} x2={svgW - pad.right} y1={bandY2} y2={bandY2} stroke="#8BC34A" strokeOpacity={0.4} strokeDasharray="6 3" />
-                    )}
-                    {/* Right-side labels */}
-                    {refRange.high !== null && (
+                const hasBothBounds = refRange.low !== null && refRange.high !== null
+                if (hasBothBounds) {
+                  // Two-bound range (e.g. "70-100") → green shaded band
+                  const bandY1 = pad.top + innerH - ((refRange.high! - yMin) / range) * innerH
+                  const bandY2 = pad.top + innerH - ((refRange.low! - yMin) / range) * innerH
+                  const bandHeight = Math.max(bandY2 - bandY1, 1)
+                  const bandMidY = bandY1 + bandHeight / 2
+                  return (
+                    <g>
+                      <rect x={pad.left} y={bandY1} width={innerW} height={bandHeight}
+                        fill="#8BC34A" fillOpacity={0.1} rx={4} />
+                      <line x1={pad.left} x2={svgW - pad.right} y1={bandY1} y2={bandY1}
+                        stroke="#8BC34A" strokeOpacity={0.4} strokeDasharray="6 3" />
+                      <line x1={pad.left} x2={svgW - pad.right} y1={bandY2} y2={bandY2}
+                        stroke="#8BC34A" strokeOpacity={0.4} strokeDasharray="6 3" />
                       <text x={svgW - pad.right + 6} y={bandY1 + 4} className="text-[9px] fill-[#6a9a2e] font-semibold">{refRange.high}</text>
-                    )}
-                    {refRange.low !== null && (
                       <text x={svgW - pad.right + 6} y={bandY2 + 4} className="text-[9px] fill-[#6a9a2e] font-semibold">{refRange.low}</text>
-                    )}
-                    {/* "Normal" label centered in band */}
-                    {bandHeight > 20 && (
-                      <text x={svgW - pad.right - 6} y={bandMidY + 3} textAnchor="end" className="text-[9px] fill-[#8BC34A] font-medium" fillOpacity={0.6}>Normal</text>
-                    )}
-                  </g>
-                )
+                      {bandHeight > 20 && (
+                        <text x={svgW - pad.right - 6} y={bandMidY + 3} textAnchor="end"
+                          className="text-[9px] fill-[#8BC34A] font-medium" fillOpacity={0.6}>Normal</text>
+                      )}
+                    </g>
+                  )
+                } else {
+                  // Single-bound range (e.g. "< 200" or "> 60") → single threshold line
+                  const thresholdVal = refRange.high ?? refRange.low!
+                  const thresholdY = pad.top + innerH - ((thresholdVal - yMin) / range) * innerH
+                  const isUpper = refRange.high !== null // "< X" means upper limit
+                  const label = isUpper ? `< ${thresholdVal}` : `> ${thresholdVal}`
+                  return (
+                    <g>
+                      <line x1={pad.left} x2={svgW - pad.right} y1={thresholdY} y2={thresholdY}
+                        stroke="#8BC34A" strokeWidth={1.5} strokeDasharray="8 4" />
+                      <text x={svgW - pad.right + 6} y={thresholdY + 4}
+                        className="text-[9px] fill-[#6a9a2e] font-semibold">{label}</text>
+                      <text x={pad.left + 8} y={thresholdY - 6}
+                        className="text-[9px] fill-[#8BC34A] font-medium" fillOpacity={0.7}>Normal limit</text>
+                    </g>
+                  )
+                }
               })()}
 
               <defs>
@@ -560,9 +637,13 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
               {/* Legend */}
               {refRange && (
                 <g>
-                  <rect x={pad.left} y={svgH - 14} width={8} height={8} rx={2} fill="#8BC34A" fillOpacity={0.15} stroke="#8BC34A" strokeOpacity={0.4} strokeWidth={0.5} />
+                  {refRange.low !== null && refRange.high !== null ? (
+                    <rect x={pad.left} y={svgH - 14} width={8} height={8} rx={2} fill="#8BC34A" fillOpacity={0.15} stroke="#8BC34A" strokeOpacity={0.4} strokeWidth={0.5} />
+                  ) : (
+                    <line x1={pad.left} x2={pad.left + 8} y1={svgH - 10} y2={svgH - 10} stroke="#8BC34A" strokeWidth={1.5} strokeDasharray="3 2" />
+                  )}
                   <text x={pad.left + 12} y={svgH - 7} className="text-[8px] fill-gray-500">
-                    Normal range{refRangeStr ? ` (${refRangeStr})` : ''}
+                    Normal{refRangeStr ? `: ${refRangeStr}` : ''}
                   </text>
                 </g>
               )}
@@ -570,42 +651,77 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
           </div>
         )}
 
-        {filteredChart.length > 0 && (
-          <>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">
-              {selectedTest.split(' ')[0]} Stats
-            </h3>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="rounded-2xl bg-[#8BC34A]/10 p-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-6 h-6 rounded-lg bg-[#8BC34A]/20 flex items-center justify-center">
-                    <Activity className="w-3.5 h-3.5 text-[#6a9a2e]" />
+        {filteredChart.length > 0 && (() => {
+          const googleRange = getGoogleRange(selectedTest)
+          return (
+            <>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                {selectedTest.split(' ')[0]} Stats
+              </h3>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div className="rounded-2xl bg-[#8BC34A]/10 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-6 h-6 rounded-lg bg-[#8BC34A]/20 flex items-center justify-center">
+                      <Activity className="w-3.5 h-3.5 text-[#6a9a2e]" />
+                    </div>
+                    <span className="text-xs text-[#6a9a2e] font-semibold">Max</span>
                   </div>
-                  <span className="text-xs text-[#6a9a2e] font-semibold">Max</span>
+                  <p className="text-2xl font-bold text-[#6a9a2e]">{chartStats.max}</p>
                 </div>
-                <p className="text-2xl font-bold text-[#6a9a2e]">{chartStats.max}</p>
-              </div>
-              <div className="rounded-2xl bg-[#8BC34A]/10 p-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-6 h-6 rounded-lg bg-[#8BC34A]/20 flex items-center justify-center">
-                    <Activity className="w-3.5 h-3.5 text-[#6a9a2e]" />
+                <div className="rounded-2xl bg-[#8BC34A]/10 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-6 h-6 rounded-lg bg-[#8BC34A]/20 flex items-center justify-center">
+                      <Activity className="w-3.5 h-3.5 text-[#6a9a2e]" />
+                    </div>
+                    <span className="text-xs text-[#6a9a2e] font-semibold">Min</span>
                   </div>
-                  <span className="text-xs text-[#6a9a2e] font-semibold">Min</span>
+                  <p className="text-2xl font-bold text-[#6a9a2e]">{chartStats.min}</p>
                 </div>
-                <p className="text-2xl font-bold text-[#6a9a2e]">{chartStats.min}</p>
-              </div>
-              <div className="rounded-2xl bg-gray-100 p-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-6 h-6 rounded-lg bg-gray-200 flex items-center justify-center">
-                    <Activity className="w-3.5 h-3.5 text-gray-500" />
+                <div className="rounded-2xl bg-gray-100 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-6 h-6 rounded-lg bg-gray-200 flex items-center justify-center">
+                      <Activity className="w-3.5 h-3.5 text-gray-500" />
+                    </div>
+                    <span className="text-xs text-gray-500 font-semibold">Avg</span>
                   </div>
-                  <span className="text-xs text-gray-500 font-semibold">Avg</span>
+                  <p className="text-2xl font-bold text-gray-700">{chartStats.avg}</p>
                 </div>
-                <p className="text-2xl font-bold text-gray-700">{chartStats.avg}</p>
               </div>
-            </div>
-          </>
-        )}
+
+              {/* Reference ranges row */}
+              <div className={`grid ${refRangeStr && googleRange ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
+                {refRangeStr && (
+                  <div className="rounded-2xl border-2 border-[#8BC34A]/30 bg-[#8BC34A]/5 p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-6 h-6 rounded-lg bg-[#8BC34A]/20 flex items-center justify-center">
+                        <Heart className="w-3.5 h-3.5 text-[#6a9a2e]" />
+                      </div>
+                      <span className="text-xs text-[#6a9a2e] font-semibold">Normal Range</span>
+                      <span className="text-[10px] text-[#8BC34A]/60 ml-auto">from your report</span>
+                    </div>
+                    <p className="text-xl font-bold text-[#6a9a2e]">{refRangeStr}</p>
+                  </div>
+                )}
+                {googleRange && (
+                  <div className="rounded-2xl border-2 border-blue-200 bg-blue-50/50 p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-6 h-6 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                      </div>
+                      <span className="text-xs text-blue-600 font-semibold">Google Est. Range</span>
+                    </div>
+                    <p className="text-xl font-bold text-blue-700">{googleRange}</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )
+        })()}
       </div>
     )
   }
