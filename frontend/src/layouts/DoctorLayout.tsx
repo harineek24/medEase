@@ -20,7 +20,7 @@ const navItems = [
   { to: '/doctor/history',     icon: Clock,           label: 'History',      end: false },
   { to: '/doctor/appointments', icon: CalendarDays,   label: 'Appointments', end: false },
   { to: '/doctor/notes',       icon: FileText,        label: 'Notes',        end: false },
-  { to: '/doctor/settings',    icon: Settings,        label: 'Settings',     end: false },
+  { to: '/doctor/consultconfig', icon: Settings,        label: 'Consult Config', end: false },
 ]
 
 export default function DoctorLayout() {

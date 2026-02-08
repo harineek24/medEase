@@ -1695,6 +1695,7 @@ class PatientUpdateRequest(BaseModel):
     patient_id: int = 1
     update_text: str
     audio_duration: Optional[int] = None
+    audio_url: Optional[str] = None
 
 
 # =============================================================================
@@ -2292,6 +2293,7 @@ Patient update:
         update_id = db.add_patient_update(
             patient_id=request.patient_id,
             update_text=request.update_text,
+            audio_url=request.audio_url,
             audio_duration=request.audio_duration,
             summary=summary,
             questions=questions
@@ -2319,19 +2321,40 @@ async def get_patient_updates_endpoint(patient_id: int, limit: int = 50):
 
 @app.post("/api/patient-updates/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-    """Transcribe audio to text using Gemini."""
+    """Transcribe audio to text using Gemini and save the audio file."""
     try:
         file_content = await file.read()
         file_base64 = base64.b64encode(file_content).decode('utf-8')
+
+        # Save audio file to disk
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        audio_filename = f"update_audio_{timestamp}.webm"
+        audio_dir = OUTPUTS_DIR / "audio"
+        audio_dir.mkdir(exist_ok=True)
+        audio_path = audio_dir / audio_filename
+        audio_path.write_bytes(file_content)
 
         response = model.generate_content([
             "Transcribe this audio recording exactly. Return only the transcription text, nothing else.",
             {"mime_type": "audio/webm", "data": file_base64}
         ])
 
-        return JSONResponse(content={"text": response.text.strip()})
+        return JSONResponse(content={
+            "text": response.text.strip(),
+            "audio_url": f"/api/audio/{audio_filename}"
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error transcribing: {str(e)}")
+
+
+@app.get("/api/audio/{filename}")
+async def serve_audio(filename: str):
+    """Serve a saved audio file."""
+    from fastapi.responses import FileResponse
+    audio_path = OUTPUTS_DIR / "audio" / filename
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    return FileResponse(str(audio_path), media_type="audio/webm")
 
 
 if __name__ == "__main__":

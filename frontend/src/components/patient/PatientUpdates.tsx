@@ -35,6 +35,7 @@ export default function PatientUpdates() {
   const [isRecording, setIsRecording] = useState(false)
   const [recordTime, setRecordTime] = useState(0)
   const [transcribing, setTranscribing] = useState(false)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -126,6 +127,7 @@ export default function PatientUpdates() {
       if (res.ok) {
         const data = await res.json()
         setInput(prev => prev ? `${prev}\n${data.text}` : data.text)
+        if (data.audio_url) setAudioUrl(data.audio_url)
       }
     } catch (err) {
       console.error('Transcription error:', err)
@@ -146,6 +148,7 @@ export default function PatientUpdates() {
           patient_id: 1,
           update_text: input.trim(),
           audio_duration: recordTime > 0 ? recordTime : null,
+          audio_url: audioUrl,
         }),
       })
       if (res.ok) {
@@ -159,6 +162,7 @@ export default function PatientUpdates() {
         }
         setUpdates(prev => [newUpdate, ...prev])
         setInput('')
+        setAudioUrl(null)
         setExpandedId(data.id)
       }
     } catch (err) {

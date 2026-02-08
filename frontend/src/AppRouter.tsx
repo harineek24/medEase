@@ -90,7 +90,7 @@ export default function AppRouter() {
         <Route path="history" element={<DoctorHistory />} />
         <Route path="appointments" element={<PlaceholderPage title="Appointments" />} />
         <Route path="notes" element={<PlaceholderPage title="Notes" />} />
-        <Route path="settings" element={<ConsultConfig />} />
+        <Route path="consultconfig" element={<ConsultConfig />} />
       </Route>
 
       {/* ---- Patient Portal ---- */}

@@ -6,7 +6,6 @@ import {
   User,
   Calendar,
   Clock,
-  FileText,
   Search,
 } from 'lucide-react'
 
@@ -147,12 +146,6 @@ export default function DoctorHistory() {
               <div className="flex items-center gap-4 text-sm text-gray-500 mt-0.5">
                 {selectedPatient.gender && <span>{selectedPatient.gender}</span>}
                 {selectedPatient.date_of_birth && <span>DOB: {selectedPatient.date_of_birth}</span>}
-                {selectedPatient.summary_count !== undefined && (
-                  <span className="flex items-center gap-1">
-                    <FileText className="w-3.5 h-3.5" />
-                    {selectedPatient.summary_count} reports
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -257,17 +250,6 @@ export default function DoctorHistory() {
                     </div>
                   )}
 
-                  {/* Meta stats */}
-                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
-                    {patient.summary_count !== undefined && patient.summary_count > 0 && (
-                      <span className="flex items-center gap-1">
-                        <FileText className="w-3 h-3" /> {patient.summary_count} reports
-                      </span>
-                    )}
-                    {patient.active_prescriptions !== undefined && patient.active_prescriptions > 0 && (
-                      <span>{patient.active_prescriptions} active Rx</span>
-                    )}
-                  </div>
                 </div>
               </div>
             </button>
