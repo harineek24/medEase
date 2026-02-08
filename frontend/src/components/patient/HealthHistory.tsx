@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { API_BASE_URL } from '../../api'
 import {
   ChevronLeft,
+  ChevronRight,
   Heart,
   Droplets,
   Thermometer,
@@ -10,6 +11,7 @@ import {
   TestTube,
   FileText,
   Upload,
+  X,
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -63,10 +65,46 @@ const iconFor = (name: string) => {
   return TestTube
 }
 
-const statusDot = (status: string) => {
-  if (status === 'normal') return 'bg-[#8BC34A]'
-  if (status === 'borderline') return 'bg-yellow-400'
-  return 'bg-red-400'
+const vitalKeywords = ['blood pressure', 'bp', 'systolic', 'diastolic', 'heart rate', 'pulse', 'oxygen', 'spo2', 'temperature', 'temp', 'respiratory', 'glucose', 'blood sugar']
+const isVital = (name: string) => vitalKeywords.some(k => name.toLowerCase().includes(k))
+
+/** Color classes based on test status */
+const statusStyles = (status: string) => {
+  if (status === 'normal') return {
+    border: 'border-[#8BC34A]/40',
+    bg: 'bg-[#8BC34A]/5',
+    text: 'text-[#4a7c0f]',
+    badge: 'bg-[#8BC34A]/15 text-[#4a7c0f]',
+    value: 'text-[#4a7c0f]',
+  }
+  if (status === 'borderline') return {
+    border: 'border-yellow-300',
+    bg: 'bg-yellow-50',
+    text: 'text-yellow-700',
+    badge: 'bg-yellow-100 text-yellow-700',
+    value: 'text-yellow-700',
+  }
+  return {
+    border: 'border-red-300',
+    bg: 'bg-red-50',
+    text: 'text-red-600',
+    badge: 'bg-red-100 text-red-600',
+    value: 'text-red-600',
+  }
+}
+
+/** Extract "What Happened" section from raw_summary markdown */
+const extractWhatHappened = (raw: string): string => {
+  if (!raw) return ''
+  // Look for the "What Happened" section
+  const regex = /##\s*(?:❤️\s*)?What Happened\s*\n([\s\S]*?)(?=\n##\s|\n---|\n\*\*|$)/i
+  const match = raw.match(regex)
+  if (match && match[1]) {
+    return match[1].trim().replace(/^[-*]\s+/gm, '').replace(/\n+/g, ' ').trim()
+  }
+  // Fallback: return first meaningful paragraph
+  const lines = raw.split('\n').filter(l => l.trim() && !l.startsWith('#') && !l.startsWith('---'))
+  return lines.slice(0, 2).join(' ').trim()
 }
 
 // ─── Mini sparkline SVG ──────────────────────────────────────────────
@@ -106,11 +144,12 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
   const [loading, setLoading] = useState(true)
 
   // UI
-  type View = 'overview' | 'detail' | 'summaries'
+  type View = 'overview' | 'detail' | 'summaries' | 'summary-detail'
   const [view, setView] = useState<View>('overview')
   const [selectedTest, setSelectedTest] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<HealthTimeRange>('all')
   const [chartLoading, setChartLoading] = useState(false)
+  const [selectedSummary, setSelectedSummary] = useState<SummaryItem | null>(null)
 
   // ─── Data fetching ─────────────────────────────────────────────────
   useEffect(() => {
@@ -124,7 +163,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
         if (namesRes.ok) {
           const names: TestName[] = await namesRes.json()
           setTestNames(names)
-          // Kick off sparkline fetches for each (max 12)
           names.slice(0, 12).forEach(n => fetchHistory(n.test_name))
         }
         if (summRes.ok) {
@@ -194,14 +232,12 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     }
   }, [filteredChart])
 
-  // Latest value for a test
   const latestValue = (testName: string) => {
     const pts = historyCache[testName]
     if (!pts || pts.length === 0) return null
     return pts[pts.length - 1]
   }
 
-  // Sparkline values for a test
   const sparklineValues = (testName: string): number[] => {
     const pts = historyCache[testName]
     if (!pts || pts.length < 2) return []
@@ -214,7 +250,11 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     return '#ef4444'
   }
 
-  // ─── Loading state ─────────────────────────────────────────────────
+  // Split tests into vitals and lab results
+  const vitalTests = testNames.filter(t => isVital(t.test_name))
+  const labTests = testNames.filter(t => !isVital(t.test_name))
+
+  // ─── Loading ───────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -226,7 +266,7 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     )
   }
 
-  // ─── Empty state ───────────────────────────────────────────────────
+  // ─── Empty ─────────────────────────────────────────────────────────
   if (testNames.length === 0 && summaries.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -259,7 +299,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     const latestUnit = latest?.unit || ''
     const Icon = iconFor(selectedTest)
 
-    // SVG chart
     const svgW = 540, svgH = 220
     const pad = { top: 24, right: 24, bottom: 34, left: 50 }
     const innerW = svgW - pad.left - pad.right
@@ -291,7 +330,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
 
     return (
       <div className="max-w-3xl mx-auto px-4 py-8">
-        {/* Back button */}
         <button
           onClick={() => { setView('overview'); setSelectedTest(null) }}
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition mb-6"
@@ -299,7 +337,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
           <ChevronLeft className="w-4 h-4" /> Back
         </button>
 
-        {/* Header */}
         <div className="flex items-center gap-4 mb-2">
           <div className="w-12 h-12 rounded-2xl bg-[#8BC34A]/10 flex items-center justify-center">
             <Icon className="w-6 h-6 text-[#8BC34A]" />
@@ -313,7 +350,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
           </div>
         </div>
 
-        {/* Time range pills */}
         <div className="flex gap-2 my-6 flex-wrap">
           {(Object.keys(timeLabels) as HealthTimeRange[]).map(key => (
             <button
@@ -330,7 +366,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
           ))}
         </div>
 
-        {/* Chart */}
         {chartLoading ? (
           <div className="flex items-center justify-center h-56">
             <div className="h-8 w-8 rounded-full border-3 border-[#8BC34A] border-t-transparent animate-spin" />
@@ -342,7 +377,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
         ) : (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-6">
             <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-auto">
-              {/* Grid */}
               {yTicks.map(val => {
                 const y = pad.top + innerH - ((val - chartStats.min) / range) * innerH
                 return (
@@ -355,8 +389,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
               {xLabels.map((lbl, i) => (
                 <text key={i} x={lbl.x} y={svgH - 8} textAnchor="middle" className="text-[9px] fill-gray-400">{lbl.label}</text>
               ))}
-
-              {/* Area fill */}
               <defs>
                 <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#8BC34A" stopOpacity="0.25" />
@@ -364,11 +396,7 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
                 </linearGradient>
               </defs>
               <path d={areaPath} fill="url(#chartGrad)" />
-
-              {/* Line */}
               <path d={linePath} fill="none" stroke="#8BC34A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-
-              {/* Data points */}
               {chartPoints.map((p, i) => (
                 <g key={i}>
                   <circle cx={p.x} cy={p.y} r={4} fill="#8BC34A" stroke="#fff" strokeWidth={2} />
@@ -379,8 +407,6 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
                   )}
                 </g>
               ))}
-
-              {/* Min / Max annotations */}
               {filteredChart.length > 2 && (() => {
                 const minPt = chartPoints.reduce((a, b) => a.d.value < b.d.value ? a : b)
                 const maxPt = chartPoints.reduce((a, b) => a.d.value > b.d.value ? a : b)
@@ -397,17 +423,10 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
                   </>
                 )
               })()}
-
-              {/* Legend */}
-              <circle cx={pad.left} cy={svgH - 8} r={3} fill="#8BC34A" />
-              <text x={pad.left + 8} y={svgH - 5} className="text-[8px] fill-gray-400">Min Value</text>
-              <circle cx={pad.left + 70} cy={svgH - 8} r={3} fill="#8BC34A" />
-              <text x={pad.left + 78} y={svgH - 5} className="text-[8px] fill-gray-400">Max Value</text>
             </svg>
           </div>
         )}
 
-        {/* Stats row */}
         {filteredChart.length > 0 && (
           <>
             <h3 className="text-sm font-semibold text-gray-700 mb-3">
@@ -449,7 +468,50 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // SUMMARIES VIEW — chronological "What Happened" list
+  // SUMMARY DETAIL — full summary modal
+  // ═══════════════════════════════════════════════════════════════════
+  if (view === 'summary-detail' && selectedSummary) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <button
+          onClick={() => { setView('summaries'); setSelectedSummary(null) }}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition mb-6"
+        >
+          <ChevronLeft className="w-4 h-4" /> Back to summaries
+        </button>
+
+        <div className="mb-6">
+          <div className="flex items-start justify-between">
+            <h2 className="text-2xl font-light text-gray-900">
+              {selectedSummary.patient_name || 'Medical Report'}
+            </h2>
+            <button
+              onClick={() => { setView('summaries'); setSelectedSummary(null) }}
+              className="p-1 hover:bg-gray-100 rounded-lg transition"
+            >
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+          </div>
+          {selectedSummary.diagnosis && (
+            <p className="text-sm text-[#8BC34A] font-medium mt-1">{selectedSummary.diagnosis}</p>
+          )}
+          <div className="flex gap-3 mt-2 text-xs text-gray-400">
+            {selectedSummary.visit_location && <span>{selectedSummary.visit_location}</span>}
+            {selectedSummary.visit_date && <span>Visit: {selectedSummary.visit_date}</span>}
+            <span>{new Date(selectedSummary.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          </div>
+        </div>
+
+        {/* Full summary content */}
+        <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-line rounded-2xl bg-white border border-gray-100 p-6">
+          {selectedSummary.raw_summary}
+        </div>
+      </div>
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SUMMARIES LIST — "What Happened" entries
   // ═══════════════════════════════════════════════════════════════════
   if (view === 'summaries') {
     return (
@@ -463,34 +525,45 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
 
         <h2 className="text-2xl font-light text-gray-900 mb-1">What Happened</h2>
         <p className="text-sm text-gray-400 mb-6">
-          {summaries.length} report{summaries.length !== 1 ? 's' : ''} in chronological order
+          {summaries.length} report{summaries.length !== 1 ? 's' : ''} — tap to read the full summary
         </p>
 
-        <div className="space-y-4">
+        <div className="space-y-3">
           {summaries.map((s) => {
             const dt = new Date(s.created_at)
+            const whatHappened = extractWhatHappened(s.raw_summary)
+
             return (
-              <div key={s.id} className="rounded-2xl border border-gray-100 bg-white p-5 hover:shadow-sm transition">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
+              <button
+                key={s.id}
+                onClick={() => { setSelectedSummary(s); setView('summary-detail') }}
+                className="w-full text-left rounded-2xl border border-gray-100 bg-white p-5 hover:shadow-md hover:border-gray-200 transition-all group"
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
                     <h3 className="font-medium text-gray-900">{s.patient_name || 'Medical Report'}</h3>
                     {s.diagnosis && (
                       <p className="text-sm text-[#8BC34A] font-medium mt-0.5">{s.diagnosis}</p>
                     )}
                   </div>
-                  <span className="text-xs text-gray-400 shrink-0 ml-4">
-                    {dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </span>
+                  <div className="flex items-center gap-2 shrink-0 ml-4">
+                    <span className="text-xs text-gray-400">
+                      {dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition" />
+                  </div>
                 </div>
                 {s.visit_location && (
-                  <p className="text-xs text-gray-400 mb-2">{s.visit_location}{s.visit_date ? ` · Visit: ${s.visit_date}` : ''}</p>
-                )}
-                {s.raw_summary && (
-                  <p className="text-sm text-gray-600 leading-relaxed line-clamp-4 whitespace-pre-line">
-                    {s.raw_summary.slice(0, 400)}{s.raw_summary.length > 400 ? '...' : ''}
+                  <p className="text-xs text-gray-400 mb-2">
+                    {s.visit_location}{s.visit_date ? ` · Visit: ${s.visit_date}` : ''}
                   </p>
                 )}
-              </div>
+                {whatHappened && (
+                  <p className="text-sm text-gray-600 leading-relaxed line-clamp-3">
+                    {whatHappened}
+                  </p>
+                )}
+              </button>
             )
           })}
         </div>
@@ -499,74 +572,132 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // OVERVIEW — Health metric cards + What Happened
+  // OVERVIEW — matching Health Dashboard screenshot UI
   // ═══════════════════════════════════════════════════════════════════
+
+  /** Render a single vitals card (large, like the Glucose card in screenshot) */
+  const renderVitalCard = (t: TestName) => {
+    const s = statusStyles(t.status)
+    const latest = latestValue(t.test_name)
+    const vals = sparklineValues(t.test_name)
+
+    return (
+      <button
+        key={t.test_name}
+        onClick={() => openDetail(t.test_name)}
+        className={`w-full text-left rounded-2xl border-2 ${s.border} ${s.bg} p-5 hover:shadow-md transition-all`}
+      >
+        <p className={`text-xs font-bold uppercase tracking-wider ${s.text} mb-2`}>
+          {t.test_name}
+        </p>
+        <div className="flex items-end justify-between">
+          <div>
+            <p className={`text-3xl font-bold ${s.value}`}>
+              {latest?.value ?? '—'}
+              {latest?.unit && <span className="text-sm font-normal ml-1">{latest.unit}</span>}
+            </p>
+            <span className={`inline-block mt-2 text-xs font-medium px-2.5 py-1 rounded-full ${s.badge}`}>
+              {t.status}
+            </span>
+          </div>
+          {vals.length >= 2 && (
+            <Sparkline values={vals} color={sparkColor(t.status)} />
+          )}
+        </div>
+      </button>
+    )
+  }
+
+  /** Render a lab result card (compact, 2-col grid) */
+  const renderLabCard = (t: TestName) => {
+    const s = statusStyles(t.status)
+    const latest = latestValue(t.test_name)
+    const pts = historyCache[t.test_name]
+    // Use explanation from the latest point if available
+    const explanation = pts && pts.length > 0 ? pts[pts.length - 1].reference_range : null
+
+    return (
+      <button
+        key={t.test_name}
+        onClick={() => openDetail(t.test_name)}
+        className={`w-full text-left rounded-2xl border-2 ${s.border} ${s.bg} p-4 hover:shadow-md transition-all`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-semibold ${s.text}`}>{t.test_name}</p>
+            {explanation && (
+              <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{explanation}</p>
+            )}
+          </div>
+          <div className="text-right shrink-0">
+            {latest?.value && latest.value !== 'Within range' ? (
+              <p className={`text-lg font-bold ${s.value}`}>
+                {latest.value}
+                {latest.unit && <span className="text-xs font-normal ml-0.5">{latest.unit}</span>}
+              </p>
+            ) : (
+              <p className={`text-sm font-bold ${s.value}`}>Within range</p>
+            )}
+            <span className={`inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full ${s.badge}`}>
+              {t.status}
+            </span>
+          </div>
+        </div>
+      </button>
+    )
+  }
+
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <h2 className="text-2xl font-light text-gray-900 mb-1">Health Overview</h2>
-      <p className="text-sm text-gray-400 mb-6">Tap a card to see detailed charts</p>
-
-      {/* Health metric cards */}
-      <div className="space-y-3 mb-6">
-        {testNames.map((t) => {
-          const Icon = iconFor(t.test_name)
-          const latest = latestValue(t.test_name)
-          const vals = sparklineValues(t.test_name)
-          const color = sparkColor(t.status)
-
-          return (
-            <button
-              key={t.test_name}
-              onClick={() => openDetail(t.test_name)}
-              className="w-full flex items-center gap-4 p-4 rounded-2xl bg-white border border-gray-100 hover:shadow-md hover:border-gray-200 transition-all text-left group"
-            >
-              {/* Icon */}
-              <div className="w-10 h-10 rounded-xl bg-[#8BC34A]/10 flex items-center justify-center shrink-0">
-                <Icon className="w-5 h-5 text-[#8BC34A]" />
-              </div>
-
-              {/* Name + value */}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">{t.test_name}</p>
-                <p className="text-lg font-bold text-gray-900">
-                  {latest?.value ?? '—'}
-                  {latest?.unit && <span className="text-xs text-gray-400 ml-1 font-normal">{latest.unit}</span>}
-                </p>
-              </div>
-
-              {/* Sparkline */}
-              <div className="shrink-0">
-                {vals.length >= 2 ? (
-                  <Sparkline values={vals} color={color} />
-                ) : (
-                  <div className="w-20 h-8 rounded bg-gray-50" />
-                )}
-              </div>
-
-              {/* Status dot */}
-              <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(t.status)}`} />
-            </button>
-          )
-        })}
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-1">
+        <div className="w-10 h-10 rounded-full bg-[#8BC34A]/10 flex items-center justify-center">
+          <svg className="w-5 h-5 text-[#8BC34A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+          </svg>
+        </div>
+        <div>
+          <h2 className="text-2xl font-light text-gray-900">Health Overview</h2>
+          <p className="text-sm text-gray-400">Based off your latest report</p>
+        </div>
       </div>
+
+      {/* Vital cards */}
+      {vitalTests.length > 0 && (
+        <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {vitalTests.map(renderVitalCard)}
+        </div>
+      )}
+
+      {/* Lab Results */}
+      {labTests.length > 0 && (
+        <>
+          <h3 className="text-lg font-semibold text-gray-900 mt-10 mb-4">Lab Results</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {labTests.map(renderLabCard)}
+          </div>
+        </>
+      )}
 
       {/* What Happened card */}
       {summaries.length > 0 && (
-        <button
-          onClick={() => setView('summaries')}
-          className="w-full flex items-center gap-4 p-5 rounded-2xl bg-gradient-to-r from-[#8BC34A]/5 to-[#8BC34A]/10 border border-[#8BC34A]/20 hover:shadow-md hover:border-[#8BC34A]/30 transition-all text-left"
-        >
-          <div className="w-12 h-12 rounded-2xl bg-[#8BC34A]/15 flex items-center justify-center shrink-0">
-            <FileText className="w-6 h-6 text-[#8BC34A]" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-base font-medium text-gray-900">What Happened</p>
-            <p className="text-sm text-gray-500 truncate">
-              {summaries.length} medical report{summaries.length !== 1 ? 's' : ''} · {summaries[0]?.diagnosis || 'View all summaries'}
-            </p>
-          </div>
-          <ChevronLeft className="w-5 h-5 text-gray-400 rotate-180 shrink-0" />
-        </button>
+        <div className="mt-10">
+          <button
+            onClick={() => setView('summaries')}
+            className="w-full flex items-center gap-4 p-5 rounded-2xl bg-gradient-to-r from-[#8BC34A]/5 to-[#8BC34A]/10 border-2 border-[#8BC34A]/20 hover:shadow-md hover:border-[#8BC34A]/30 transition-all text-left"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-[#8BC34A]/15 flex items-center justify-center shrink-0">
+              <FileText className="w-6 h-6 text-[#8BC34A]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-base font-semibold text-gray-900">What Happened</p>
+              <p className="text-sm text-gray-500 line-clamp-1 mt-0.5">
+                {summaries.length} medical report{summaries.length !== 1 ? 's' : ''} · {summaries[0]?.diagnosis || 'View all summaries'}
+              </p>
+            </div>
+            <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />
+          </button>
+        </div>
       )}
     </div>
   )
