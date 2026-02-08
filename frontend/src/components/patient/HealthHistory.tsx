@@ -361,20 +361,35 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     const refRangeStr = historyPoints.find(p => p.reference_range)?.reference_range || null
     const refRange = parseReferenceRange(refRangeStr)
 
-    // Expand chart min/max to include reference range
+    // Expand chart bounds to include reference range + enforce minimum span
     let yMin = chartStats.min
     let yMax = chartStats.max
     if (refRange) {
-      if (refRange.low !== null) yMin = Math.min(yMin, refRange.low)
-      if (refRange.high !== null) yMax = Math.max(yMax, refRange.high)
+      if (refRange.low !== null) {
+        yMin = Math.min(yMin, refRange.low)
+        yMax = Math.max(yMax, refRange.low)
+      }
+      if (refRange.high !== null) {
+        yMin = Math.min(yMin, refRange.high)
+        yMax = Math.max(yMax, refRange.high)
+      }
     }
-    // Add a small padding so the range band isn't at the very edge
-    const yPad = (yMax - yMin) * 0.08
+    // Enforce minimum meaningful span (20% of center or 10 units, whichever is larger)
+    const center = (yMin + yMax) / 2
+    const minSpan = Math.max(center * 0.2, 10)
+    if (yMax - yMin < minSpan) {
+      yMin = center - minSpan / 2
+      yMax = center + minSpan / 2
+    }
+    // Padding
+    const yPad = (yMax - yMin) * 0.1
     yMin = Math.floor((yMin - yPad) * 10) / 10
     yMax = Math.ceil((yMax + yPad) * 10) / 10
+    // Don't go below 0 for most medical values
+    if (chartStats.min >= 0) yMin = Math.max(0, yMin)
 
-    const svgW = 540, svgH = 220
-    const pad = { top: 24, right: 24, bottom: 34, left: 50 }
+    const svgW = 560, svgH = 220
+    const pad = { top: 24, right: refRange ? 48 : 24, bottom: 34, left: 50 }
     const innerW = svgW - pad.left - pad.right
     const innerH = svgH - pad.top - pad.bottom
     const range = yMax - yMin || 1
@@ -421,6 +436,9 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
               {latestVal}
               {latestUnit && <span className="text-lg text-gray-400 ml-1">{latestUnit}</span>}
             </p>
+            {refRangeStr && (
+              <p className="text-xs text-[#8BC34A] font-medium mt-1">Normal: {refRangeStr}</p>
+            )}
           </div>
         </div>
 
@@ -470,24 +488,36 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
                 const bandHigh = refRange.high !== null ? refRange.high : yMax
                 const bandY1 = pad.top + innerH - ((bandHigh - yMin) / range) * innerH
                 const bandY2 = pad.top + innerH - ((bandLow - yMin) / range) * innerH
+                const bandHeight = Math.max(bandY2 - bandY1, 1)
+                const bandMidY = bandY1 + bandHeight / 2
                 return (
                   <g>
                     <rect
                       x={pad.left}
                       y={bandY1}
                       width={innerW}
-                      height={bandY2 - bandY1}
+                      height={bandHeight}
                       fill="#8BC34A"
-                      fillOpacity={0.08}
+                      fillOpacity={0.1}
                       rx={4}
                     />
-                    <line x1={pad.left} x2={svgW - pad.right} y1={bandY1} y2={bandY1} stroke="#8BC34A" strokeOpacity={0.3} strokeDasharray="6 3" />
-                    <line x1={pad.left} x2={svgW - pad.right} y1={bandY2} y2={bandY2} stroke="#8BC34A" strokeOpacity={0.3} strokeDasharray="6 3" />
+                    {/* Boundary lines */}
                     {refRange.high !== null && (
-                      <text x={svgW - pad.right + 4} y={bandY1 + 4} className="text-[8px] fill-[#8BC34A] font-medium">{refRange.high}</text>
+                      <line x1={pad.left} x2={svgW - pad.right} y1={bandY1} y2={bandY1} stroke="#8BC34A" strokeOpacity={0.4} strokeDasharray="6 3" />
                     )}
                     {refRange.low !== null && (
-                      <text x={svgW - pad.right + 4} y={bandY2 + 4} className="text-[8px] fill-[#8BC34A] font-medium">{refRange.low}</text>
+                      <line x1={pad.left} x2={svgW - pad.right} y1={bandY2} y2={bandY2} stroke="#8BC34A" strokeOpacity={0.4} strokeDasharray="6 3" />
+                    )}
+                    {/* Right-side labels */}
+                    {refRange.high !== null && (
+                      <text x={svgW - pad.right + 6} y={bandY1 + 4} className="text-[9px] fill-[#6a9a2e] font-semibold">{refRange.high}</text>
+                    )}
+                    {refRange.low !== null && (
+                      <text x={svgW - pad.right + 6} y={bandY2 + 4} className="text-[9px] fill-[#6a9a2e] font-semibold">{refRange.low}</text>
+                    )}
+                    {/* "Normal" label centered in band */}
+                    {bandHeight > 20 && (
+                      <text x={svgW - pad.right - 6} y={bandMidY + 3} textAnchor="end" className="text-[9px] fill-[#8BC34A] font-medium" fillOpacity={0.6}>Normal</text>
                     )}
                   </g>
                 )
