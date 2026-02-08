@@ -448,8 +448,29 @@ def init_database():
 
         print("Database initialized successfully!")
 
+        # Migrate: add new doctor columns if missing
+        _migrate_doctors_table(cursor)
+
         # Seed sample data if tables are empty
         _seed_sample_data(cursor)
+
+
+def _migrate_doctors_table(cursor):
+    """Add new columns to doctors table if they don't exist."""
+    new_columns = [
+        ("consultation_fee", "REAL DEFAULT 150"),
+        ("rating", "REAL DEFAULT 4.5"),
+        ("review_count", "INTEGER DEFAULT 0"),
+        ("location_lat", "REAL"),
+        ("location_lng", "REAL"),
+        ("available_hours", "TEXT DEFAULT '{}'"),
+        ("accepted_insurance", "TEXT DEFAULT ''"),
+    ]
+    for col_name, col_type in new_columns:
+        try:
+            cursor.execute(f"ALTER TABLE doctors ADD COLUMN {col_name} {col_type}")
+        except Exception:
+            pass  # Column already exists
 
 
 def _seed_sample_data(cursor):
@@ -688,6 +709,29 @@ def _seed_sample_data(cursor):
         """, (doc["clinic_id"], doc["first_name"], doc["last_name"], doc["title"],
               doc["specialty"], doc["sub_specialty"], doc["npi_number"], doc["email"],
               doc["bio"], doc["languages"], doc["education"], doc["certifications"]))
+
+    # Update doctors with consultation fees, ratings, locations, and availability
+    doctor_extras = [
+        # id, fee, rating, review_count, lat, lng, available_hours, accepted_insurance
+        (1, 175, 4.8, 127, 37.3541, -121.9552, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare'),
+        (2, 150, 4.6, 89, 37.3541, -121.9552, '{"Mon":"8:00-16:00","Tue":"8:00-16:00","Wed":"8:00-16:00","Thu":"8:00-16:00","Fri":"8:00-14:00"}', 'Aetna,Blue Cross,Kaiser,Medicaid'),
+        (3, 200, 4.9, 203, 37.3382, -121.8863, '{"Mon":"8:00-17:00","Tue":"8:00-17:00","Wed":"8:00-17:00","Thu":"8:00-17:00"}', 'Blue Cross,Cigna,United Healthcare,Humana'),
+        (4, 185, 4.7, 156, 37.3382, -121.8863, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Kaiser,United Healthcare'),
+        (5, 160, 4.5, 64, 37.5485, -121.9886, '{"Mon":"8:00-20:00","Tue":"8:00-20:00","Wed":"8:00-20:00","Thu":"8:00-20:00","Fri":"8:00-20:00","Sat":"10:00-18:00","Sun":"10:00-18:00"}', 'Aetna,Blue Cross,Cigna,Kaiser,Medicaid,United Healthcare'),
+        (6, 130, 4.4, 45, 37.5485, -121.9886, '{"Mon":"10:00-20:00","Tue":"10:00-20:00","Wed":"10:00-20:00","Thu":"10:00-20:00","Fri":"10:00-20:00","Sat":"12:00-18:00"}', 'Blue Cross,Cigna,Medicaid,United Healthcare'),
+        (7, 225, 4.9, 178, 37.4848, -122.2281, '{"Mon":"8:00-16:00","Tue":"8:00-16:00","Wed":"8:00-16:00","Thu":"8:00-16:00","Fri":"8:00-12:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare'),
+        (8, 190, 4.6, 92, 37.4848, -122.2281, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-17:00"}', 'Aetna,Blue Cross,Kaiser,Humana'),
+        (9, 210, 4.8, 165, 37.7749, -122.4194, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare,Humana'),
+        (10, 195, 4.7, 134, 37.7749, -122.4194, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-17:00"}', 'Blue Cross,Cigna,Kaiser,Medicaid,United Healthcare'),
+    ]
+
+    for doc_id, fee, rating, reviews, lat, lng, hours, insurance in doctor_extras:
+        cursor.execute("""
+            UPDATE doctors SET consultation_fee = ?, rating = ?, review_count = ?,
+                              location_lat = ?, location_lng = ?, available_hours = ?,
+                              accepted_insurance = ?
+            WHERE id = ?
+        """, (fee, rating, reviews, lat, lng, hours, insurance, doc_id))
 
     # Sample Services for each clinic
     services = [
@@ -1907,7 +1951,9 @@ def update_doctor(doctor_id: int, **kwargs) -> bool:
         valid_fields = ['clinic_id', 'first_name', 'last_name', 'title', 'specialty',
                         'sub_specialty', 'npi_number', 'license_number', 'email', 'phone',
                         'bio', 'photo_url', 'accepting_patients', 'languages',
-                        'education', 'certifications', 'is_active']
+                        'education', 'certifications', 'is_active',
+                        'consultation_fee', 'accepted_insurance', 'rating',
+                        'review_count', 'location_lat', 'location_lng', 'available_hours']
 
         for key, value in kwargs.items():
             if key in valid_fields:
@@ -2692,6 +2738,137 @@ def get_patient_updates(patient_id: int, limit: int = 50) -> list:
             ORDER BY created_at DESC LIMIT ?
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
+
+
+def search_doctors_advanced(query: str = None, specialty: str = None,
+                            min_rating: float = None, max_fee: float = None,
+                            insurance: str = None, accepting_only: bool = True) -> List[Dict]:
+    """Advanced doctor search with multiple filters."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        conditions = ["d.is_active = 1"]
+        params = []
+
+        if accepting_only:
+            conditions.append("d.accepting_patients = 1")
+
+        if query:
+            conditions.append("(LOWER(d.first_name || ' ' || d.last_name) LIKE LOWER(?) OR LOWER(d.specialty) LIKE LOWER(?) OR LOWER(d.sub_specialty) LIKE LOWER(?))")
+            params.extend([f"%{query}%", f"%{query}%", f"%{query}%"])
+
+        if specialty:
+            conditions.append("LOWER(d.specialty) LIKE LOWER(?)")
+            params.append(f"%{specialty}%")
+
+        if min_rating is not None:
+            conditions.append("d.rating >= ?")
+            params.append(min_rating)
+
+        if max_fee is not None:
+            conditions.append("d.consultation_fee <= ?")
+            params.append(max_fee)
+
+        if insurance:
+            conditions.append("LOWER(d.accepted_insurance) LIKE LOWER(?)")
+            params.append(f"%{insurance}%")
+
+        where = " AND ".join(conditions)
+        cursor.execute(f"""
+            SELECT d.*, c.name as clinic_name, c.address as clinic_address,
+                   c.city as clinic_city, c.state as clinic_state, c.zip_code as clinic_zip,
+                   c.phone as clinic_phone
+            FROM doctors d
+            LEFT JOIN clinics c ON d.clinic_id = c.id
+            WHERE {where}
+            ORDER BY d.rating DESC, d.review_count DESC
+        """, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_doctor_appointments_for_date(doctor_id: int, date: str) -> List[Dict]:
+    """Get all appointments for a doctor on a specific date."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT a.*, p.name as patient_name
+            FROM appointments a
+            LEFT JOIN patients p ON a.patient_id = p.id
+            WHERE a.doctor_id = ? AND a.appointment_date = ?
+            AND a.status NOT IN ('cancelled')
+            ORDER BY a.appointment_time ASC
+        """, (doctor_id, date))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_all_specialties() -> List[str]:
+    """Get all unique specialties from doctors."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT specialty FROM doctors WHERE is_active = 1 AND specialty IS NOT NULL ORDER BY specialty")
+        return [row['specialty'] for row in cursor.fetchall()]
+
+
+def get_all_insurance_providers() -> List[str]:
+    """Get all unique insurance providers accepted by doctors."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT accepted_insurance FROM doctors WHERE is_active = 1 AND accepted_insurance != ''")
+        providers = set()
+        for row in cursor.fetchall():
+            for p in row['accepted_insurance'].split(','):
+                p = p.strip()
+                if p:
+                    providers.add(p)
+        return sorted(list(providers))
+
+
+def update_appointment(appointment_id: int, **kwargs) -> bool:
+    """Update appointment details (date, time, status, notes)."""
+    if not kwargs:
+        return False
+    with get_db() as conn:
+        cursor = conn.cursor()
+        fields = []
+        values = []
+        valid = ['appointment_date', 'appointment_time', 'duration_minutes', 'status', 'notes']
+        for key, value in kwargs.items():
+            if key in valid:
+                fields.append(f"{key} = ?")
+                values.append(value)
+        if not fields:
+            return False
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(appointment_id)
+        cursor.execute(f"UPDATE appointments SET {', '.join(fields)} WHERE id = ?", values)
+        return cursor.rowcount > 0
+
+
+def register_patient_full(name: str, username: str, password: str,
+                          date_of_birth: str = None, email: str = None,
+                          phone: str = None, address: str = None,
+                          emergency_contact: str = None,
+                          insurance_provider: str = None,
+                          policy_number: str = None,
+                          group_number: str = None) -> int:
+    """Register a patient with full details including insurance."""
+    import hashlib
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO patients (name, username, password_hash, date_of_birth, email, phone, address, emergency_contact)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, username, password_hash, date_of_birth, email, phone, address, emergency_contact))
+        patient_id = cursor.lastrowid
+
+        # Add insurance if provided
+        if insurance_provider:
+            cursor.execute("""
+                INSERT INTO insurance (patient_id, provider_name, policy_number, group_number)
+                VALUES (?, ?, ?, ?)
+            """, (patient_id, insurance_provider, policy_number, group_number))
+
+        return patient_id
 
 
 # Initialize database on module import

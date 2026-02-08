@@ -9,6 +9,7 @@ import {
   Stethoscope,
   LayoutDashboard,
   Clock,
+  Calendar,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -19,6 +20,7 @@ const navItems = [
   { to: '/doctor/patients',    icon: Users,           label: 'Patients',     end: false },
   { to: '/doctor/history',     icon: Clock,           label: 'History',      end: false },
   { to: '/doctor/appointments', icon: CalendarDays,   label: 'Appointments', end: false },
+  { to: '/doctor/calendar',    icon: Calendar,        label: 'Calendar',     end: false },
   { to: '/doctor/notes',       icon: FileText,        label: 'Notes',        end: false },
   { to: '/doctor/consultconfig', icon: Settings,        label: 'Consult Config', end: false },
 ]

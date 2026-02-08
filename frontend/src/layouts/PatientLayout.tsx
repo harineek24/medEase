@@ -7,12 +7,13 @@ import {
   Bell,
   Heart,
   LogOut,
+  CalendarPlus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { PatientApp } from '@/App'
 
-type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health'
+type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health' | 'appointments'
 
 export default function PatientLayout() {
   const [currentView, setCurrentView] = useState<PatientView>('upload')
@@ -23,8 +24,9 @@ export default function PatientLayout() {
     { view: 'history',   icon: Clock,            label: 'History' },
     { view: 'chat',      icon: MessageSquare,    label: 'AI Chat' },
     { view: 'consult',   icon: Mic,              label: 'Live Consult' },
-    { view: 'updates',   icon: Bell,             label: 'Updates' },
-    { view: 'health',    icon: Heart,            label: 'Health' },
+    { view: 'updates',      icon: Bell,             label: 'Updates' },
+    { view: 'health',       icon: Heart,            label: 'Health' },
+    { view: 'appointments', icon: CalendarPlus,     label: 'Book Appt' },
   ]
 
   return (

@@ -1496,6 +1496,99 @@ async def get_doctors(specialty: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Advanced Doctor Search ---
+@app.get("/api/doctors/search")
+async def search_doctors(
+    q: Optional[str] = None,
+    specialty: Optional[str] = None,
+    min_rating: Optional[float] = None,
+    max_fee: Optional[float] = None,
+    insurance: Optional[str] = None
+):
+    """Search doctors with advanced filters."""
+    try:
+        doctors = db.search_doctors_advanced(
+            query=q, specialty=specialty,
+            min_rating=min_rating, max_fee=max_fee,
+            insurance=insurance
+        )
+        return JSONResponse(content={"doctors": doctors, "count": len(doctors)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/doctors/specialties")
+async def get_specialties():
+    """Get all available specialties."""
+    try:
+        specialties = db.get_all_specialties()
+        return JSONResponse(content={"specialties": specialties})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/doctors/insurance-providers")
+async def get_insurance_providers():
+    """Get all accepted insurance providers."""
+    try:
+        providers = db.get_all_insurance_providers()
+        return JSONResponse(content={"providers": providers})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/doctors/{doctor_id}/available-slots")
+async def get_available_slots(doctor_id: int, date: str):
+    """Get available time slots for a doctor on a given date."""
+    try:
+        import json
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        # Parse available hours
+        available_hours = json.loads(doctor.get('available_hours', '{}'))
+
+        # Get day of week
+        from datetime import datetime as dt
+        day = dt.strptime(date, '%Y-%m-%d').strftime('%a')
+
+        hours_str = available_hours.get(day)
+        if not hours_str:
+            return JSONResponse(content={"slots": [], "message": "Doctor not available on this day"})
+
+        # Parse hours (e.g., "9:00-17:00")
+        start_str, end_str = hours_str.split('-')
+        start_h, start_m = map(int, start_str.split(':'))
+        end_h, end_m = map(int, end_str.split(':'))
+
+        # Generate 30-min slots
+        slots = []
+        current_h, current_m = start_h, start_m
+        while (current_h * 60 + current_m) < (end_h * 60 + end_m):
+            slots.append(f"{current_h:02d}:{current_m:02d}")
+            current_m += 30
+            if current_m >= 60:
+                current_h += 1
+                current_m = 0
+
+        # Remove booked slots
+        booked = db.get_doctor_appointments_for_date(doctor_id, date)
+        booked_times = set()
+        for apt in booked:
+            t = apt['appointment_time']
+            # Mark the slot and next slot (for 30-min appointments)
+            booked_times.add(t[:5])  # e.g., "09:00"
+
+        available_slots = [s for s in slots if s not in booked_times]
+
+        return JSONResponse(content={"slots": available_slots, "date": date})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/doctors/{doctor_id}")
 async def get_doctor(doctor_id: int):
     """Get a specific doctor."""
@@ -1696,6 +1789,53 @@ class PatientUpdateRequest(BaseModel):
     update_text: str
     audio_duration: Optional[int] = None
     audio_url: Optional[str] = None
+
+
+class RegisterPatientFullRequest(BaseModel):
+    name: str
+    date_of_birth: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    insurance_provider: Optional[str] = None
+    policy_number: Optional[str] = None
+    group_number: Optional[str] = None
+
+
+class BookAppointmentRequest(BaseModel):
+    patient_id: int
+    doctor_id: int
+    appointment_date: str
+    appointment_time: str
+    duration_minutes: int = 30
+    reason: Optional[str] = None
+
+
+class UpdateAppointmentRequest(BaseModel):
+    appointment_date: Optional[str] = None
+    appointment_time: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    duration_minutes: Optional[int] = None
+
+
+class CreateDoctorRequest(BaseModel):
+    first_name: str
+    last_name: str
+    clinic_id: Optional[int] = None
+    title: str = "MD"
+    specialty: Optional[str] = None
+    sub_specialty: Optional[str] = None
+    npi_number: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    languages: str = "English"
+    education: Optional[str] = None
+    certifications: Optional[str] = None
+    consultation_fee: Optional[float] = 150
+    accepted_insurance: Optional[str] = None
 
 
 # =============================================================================
@@ -2355,6 +2495,225 @@ async def serve_audio(filename: str):
     if not audio_path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
     return FileResponse(str(audio_path), media_type="audio/webm")
+
+
+# =============================================================================
+# Patient Appointment Booking
+# =============================================================================
+
+@app.post("/api/patient/book-appointment")
+async def book_appointment(request: BookAppointmentRequest):
+    """Book an appointment for a patient."""
+    try:
+        doctor = db.get_doctor(request.doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        appointment_id = db.create_appointment(
+            patient_id=request.patient_id,
+            doctor_id=request.doctor_id,
+            clinic_id=doctor['clinic_id'],
+            appointment_date=request.appointment_date,
+            appointment_time=request.appointment_time,
+            duration_minutes=request.duration_minutes,
+            notes=request.reason
+        )
+        return JSONResponse(content={
+            "success": True,
+            "appointment_id": appointment_id,
+            "message": f"Appointment booked with Dr. {doctor['last_name']} on {request.appointment_date} at {request.appointment_time}"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Doctor Calendar Endpoints
+# =============================================================================
+
+@app.get("/api/doctor/{doctor_id}/calendar")
+async def doctor_calendar(doctor_id: int, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    """Get doctor's calendar appointments."""
+    try:
+        doctor = db.get_doctor(doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        with db.get_db() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT a.*, p.name as patient_name, p.phone as patient_phone,
+                       p.email as patient_email, c.name as clinic_name
+                FROM appointments a
+                LEFT JOIN patients p ON a.patient_id = p.id
+                LEFT JOIN clinics c ON a.clinic_id = c.id
+                WHERE a.doctor_id = ?
+            """
+            params = [doctor_id]
+            if start_date:
+                query += " AND a.appointment_date >= ?"
+                params.append(start_date)
+            if end_date:
+                query += " AND a.appointment_date <= ?"
+                params.append(end_date)
+            query += " ORDER BY a.appointment_date ASC, a.appointment_time ASC"
+            cursor.execute(query, params)
+            appointments = [dict(row) for row in cursor.fetchall()]
+
+        return JSONResponse(content={"appointments": appointments, "count": len(appointments)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/doctor/{doctor_id}/appointments/{appointment_id}")
+async def doctor_update_appointment(doctor_id: int, appointment_id: int, request: UpdateAppointmentRequest):
+    """Doctor accepts, rejects, or modifies an appointment."""
+    try:
+        updates = {}
+        if request.status:
+            valid_statuses = ["scheduled", "confirmed", "completed", "cancelled", "no_show", "rejected"]
+            if request.status not in valid_statuses:
+                raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+            updates['status'] = request.status
+        if request.appointment_date:
+            updates['appointment_date'] = request.appointment_date
+        if request.appointment_time:
+            updates['appointment_time'] = request.appointment_time
+        if request.notes is not None:
+            updates['notes'] = request.notes
+        if request.duration_minutes:
+            updates['duration_minutes'] = request.duration_minutes
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+
+        success = db.update_appointment(appointment_id, **updates)
+        if not success:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        return JSONResponse(content={"success": True, "message": "Appointment updated"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Admin Patient Registration (Full)
+# =============================================================================
+
+@app.post("/api/clinicadmin/patients/register-full")
+async def clinicadmin_register_patient_full(request: RegisterPatientFullRequest):
+    """Register a new patient with full HIPAA-compliant details."""
+    try:
+        # Generate credentials: username = firstname.lastname, password = firstname + "123"
+        name_parts = request.name.strip().split()
+        first = name_parts[0].lower() if name_parts else "patient"
+        last = name_parts[-1].lower() if len(name_parts) > 1 else ""
+        username = f"{first}.{last}" if last else first
+        password = f"{first}123"
+
+        # Check if username exists, append number if so
+        existing = None
+        with db.get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM patients WHERE username = ?", (username,))
+            existing = cursor.fetchone()
+
+        if existing:
+            import random
+            username = f"{username}{random.randint(1, 99)}"
+
+        patient_id = db.register_patient_full(
+            name=request.name,
+            username=username,
+            password=password,
+            date_of_birth=request.date_of_birth,
+            email=request.email,
+            phone=request.phone,
+            address=request.address,
+            emergency_contact=request.emergency_contact,
+            insurance_provider=request.insurance_provider,
+            policy_number=request.policy_number,
+            group_number=request.group_number
+        )
+
+        return JSONResponse(content={
+            "success": True,
+            "patient_id": patient_id,
+            "credentials": {
+                "username": username,
+                "password": password
+            },
+            "message": f"Patient {request.name} registered successfully"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Admin Doctor Management
+# =============================================================================
+
+@app.post("/api/clinicadmin/doctors")
+async def clinicadmin_create_doctor(request: CreateDoctorRequest):
+    """Create a new doctor."""
+    try:
+        doctor_id = db.create_doctor(
+            first_name=request.first_name,
+            last_name=request.last_name,
+            clinic_id=request.clinic_id,
+            title=request.title,
+            specialty=request.specialty,
+            sub_specialty=request.sub_specialty,
+            npi_number=request.npi_number,
+            email=request.email,
+            phone=request.phone,
+            bio=request.bio,
+            languages=request.languages,
+            education=request.education,
+            certifications=request.certifications
+        )
+        # Update extended fields
+        if request.consultation_fee or request.accepted_insurance:
+            db.update_doctor(doctor_id,
+                           consultation_fee=request.consultation_fee,
+                           accepted_insurance=request.accepted_insurance)
+
+        return JSONResponse(content={"success": True, "doctor_id": doctor_id, "message": "Doctor created"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/clinicadmin/doctors/{doctor_id}")
+async def clinicadmin_update_doctor(doctor_id: int, request: CreateDoctorRequest):
+    """Update an existing doctor."""
+    try:
+        updates = {k: v for k, v in request.dict().items() if v is not None}
+        success = db.update_doctor(doctor_id, **updates)
+        if not success:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        return JSONResponse(content={"success": True, "message": "Doctor updated"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinics")
+async def get_clinics():
+    """Get all clinics."""
+    try:
+        clinics = db.get_all_clinics()
+        return JSONResponse(content={"clinics": clinics, "count": len(clinics)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

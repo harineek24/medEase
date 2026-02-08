@@ -7,12 +7,16 @@ import {
   FileText,
   Settings,
   LogOut,
+  Users,
+  Stethoscope,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 
 const navItems = [
   { to: '/clinicadmin',              icon: LayoutDashboard, label: 'Dashboard',      end: true },
+  { to: '/clinicadmin/patients',     icon: Users,           label: 'Patients',       end: false },
+  { to: '/clinicadmin/doctors',      icon: Stethoscope,     label: 'Doctors',        end: false },
   { to: '/clinicadmin/appointments', icon: CalendarDays,    label: 'Appointments',   end: false },
   { to: '/clinicadmin/billing',      icon: Receipt,         label: 'Billing',        end: false },
   { to: '/clinicadmin/insurance',    icon: ShieldCheck,     label: 'Insurance',      end: false },

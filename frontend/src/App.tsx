@@ -8,6 +8,7 @@ import PatientChat from './components/PatientChat'
 import GeneralChat from './components/GeneralChat'
 import HealthHistory from './components/patient/HealthHistory'
 import PatientUpdates from './components/patient/PatientUpdates'
+import AppointmentBooking from './components/patient/AppointmentBooking'
 import VoiceConsult from './components/VoiceConsult'
 import { HelixScene } from './components/ui/helix-scene'
 import { Ripple } from './components/ui/material-design-3-ripple'
@@ -19,7 +20,7 @@ import { AuthProvider } from '@/contexts/AuthContext'
 type AppState = 'upload' | 'processing' | 'results'
 
 // Extended view type that includes the new patient-portal views
-export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health'
+export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health' | 'appointments'
 
 interface SummaryData {
   summary: string
@@ -804,6 +805,9 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
 
       case 'health':
         return renderHealthView()
+
+      case 'appointments':
+        return <AppointmentBooking patientId={1} />
 
       case 'upload':
       default:

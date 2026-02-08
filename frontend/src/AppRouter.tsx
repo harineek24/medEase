@@ -7,6 +7,9 @@ import PatientLayout from '@/layouts/PatientLayout'
 import Dashboard from '@/components/Dashboard'
 import ConsultConfig from '@/components/ConsultConfig'
 import DoctorHistory from '@/components/doctor/DoctorHistory'
+import DoctorCalendar from '@/components/doctor/DoctorCalendar'
+import AdminPatientRegistration from '@/components/clinicadmin/AdminPatientRegistration'
+import AdminDoctorManagement from '@/components/clinicadmin/AdminDoctorManagement'
 import type { ReactNode } from 'react'
 
 /* ------------------------------------------------------------------ */
@@ -68,6 +71,8 @@ export default function AppRouter() {
         }
       >
         <Route index element={<PlaceholderPage title="Admin Dashboard" />} />
+        <Route path="patients" element={<AdminPatientRegistration />} />
+        <Route path="doctors" element={<AdminDoctorManagement />} />
         <Route path="appointments" element={<PlaceholderPage title="Appointments" />} />
         <Route path="billing" element={<PlaceholderPage title="Billing" />} />
         <Route path="insurance" element={<PlaceholderPage title="Insurance" />} />
@@ -89,6 +94,7 @@ export default function AppRouter() {
         <Route path="patients" element={<PlaceholderPage title="Patients" />} />
         <Route path="history" element={<DoctorHistory />} />
         <Route path="appointments" element={<PlaceholderPage title="Appointments" />} />
+        <Route path="calendar" element={<DoctorCalendar />} />
         <Route path="notes" element={<PlaceholderPage title="Notes" />} />
         <Route path="consultconfig" element={<ConsultConfig />} />
       </Route>
