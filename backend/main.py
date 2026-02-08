@@ -577,13 +577,15 @@ async def extract_test_results(request: ExtractMedicationsRequest):
 
 For each test result, extract:
 - name: The test name (e.g., "Blood Sugar", "Cholesterol", "Blood Pressure")
-- value: The test value with units (e.g., "95 mg/dL", "120/80 mmHg")
+- value: The numeric value as a string (e.g., "95", "120/80", "5.6")
+- unit: The unit of measurement (e.g., "mg/dL", "mmHg", "%"). Use null if not mentioned.
+- reference_range: The normal/reference range exactly as stated in the summary (e.g., "70-100", "< 200", "> 60", "0.4 - 4.0"). Use null if not mentioned.
 - status: One of "normal", "borderline", or "abnormal"
 - explanation: Brief explanation if provided (e.g., "Good control", "Slightly elevated")
 
 Return ONLY a JSON array with no additional text. Format:
 [
-  {"name": "Test Name", "value": "value with units", "status": "normal", "explanation": "optional explanation"},
+  {"name": "Test Name", "value": "95", "unit": "mg/dL", "reference_range": "70-100", "status": "normal", "explanation": "optional explanation"},
   ...
 ]
 

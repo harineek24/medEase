@@ -1087,7 +1087,7 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     const latest = latestValue(t.test_name)
     const pts = historyCache[t.test_name]
     // Use explanation from the latest point if available
-    const explanation = pts && pts.length > 0 ? pts[pts.length - 1].reference_range : null
+    const refRange = pts && pts.length > 0 ? pts[pts.length - 1].reference_range : null
 
     return (
       <button
@@ -1098,8 +1098,8 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <p className={`text-sm font-semibold ${s.text}`}>{t.test_name}</p>
-            {explanation && (
-              <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{explanation}</p>
+            {refRange && (
+              <p className="text-xs text-[#8BC34A] mt-0.5">Normal: {refRange}</p>
             )}
           </div>
           <div className="text-right shrink-0">

@@ -70,6 +70,8 @@ interface PatientOverview {
 interface TestResult {
   name: string
   value: string
+  unit?: string
+  reference_range?: string
   status: 'normal' | 'borderline' | 'abnormal'
   normalRange?: string
   explanation?: string
@@ -242,6 +244,8 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
           test_results: testResults.map(t => ({
             name: t.name,
             value: t.value,
+            unit: t.unit || null,
+            reference_range: t.reference_range || null,
             status: t.status,
             explanation: t.explanation
           })),
