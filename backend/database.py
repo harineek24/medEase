@@ -1312,6 +1312,34 @@ def get_all_medications() -> List[Dict]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_medications_timeline() -> List[Dict]:
+    """Get all medications grouped by summary with visit dates for timeline view."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # Get all summaries that have medications, ordered by date
+        cursor.execute("""
+            SELECT DISTINCT s.id as summary_id, s.visit_date, s.created_at,
+                   s.diagnosis, p.name as patient_name, s.original_filename
+            FROM summaries s
+            JOIN medications m ON m.summary_id = s.id
+            LEFT JOIN patients p ON s.patient_id = p.id
+            ORDER BY s.created_at ASC
+        """)
+        summaries = [dict(row) for row in cursor.fetchall()]
+
+        # For each summary, get its medications
+        for summary in summaries:
+            cursor.execute("""
+                SELECT id, name, dosage, frequency, purpose, drug_class
+                FROM medications
+                WHERE summary_id = ?
+                ORDER BY name ASC
+            """, (summary['summary_id'],))
+            summary['medications'] = [dict(row) for row in cursor.fetchall()]
+
+        return summaries
+
+
 # =============================================================================
 # Test Results Operations
 # =============================================================================

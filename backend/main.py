@@ -2196,6 +2196,16 @@ async def portal_patient_insurance(patient_id: int):
         raise HTTPException(status_code=500, detail=f"Error getting insurance: {str(e)}")
 
 
+@app.get("/api/medications/timeline")
+async def get_medications_timeline():
+    """Get all medications grouped by summary/visit for timeline comparison."""
+    try:
+        timeline = db.get_medications_timeline()
+        return JSONResponse(content=timeline)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching medications timeline: {str(e)}")
+
+
 @app.get("/api/test-results/history/{test_name}")
 async def get_test_history(test_name: str):
     """Get historical readings for a specific test result across all uploads."""

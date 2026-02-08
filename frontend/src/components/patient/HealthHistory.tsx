@@ -12,6 +12,11 @@ import {
   FileText,
   Upload,
   X,
+  Pill,
+  Plus,
+  Minus,
+  TrendingUp,
+  Clock,
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -42,6 +47,27 @@ interface SummaryItem {
   visit_location: string
   created_at: string
 }
+
+interface MedItem {
+  id: number
+  name: string
+  dosage: string | null
+  frequency: string | null
+  purpose: string | null
+  drug_class: string | null
+}
+
+interface MedTimelineEntry {
+  summary_id: number
+  visit_date: string | null
+  created_at: string
+  diagnosis: string | null
+  patient_name: string | null
+  original_filename: string | null
+  medications: MedItem[]
+}
+
+type MedTab = 'changes' | 'dosage' | 'history'
 
 type HealthTimeRange = '1d' | '1w' | '1m' | '1y' | 'all'
 
@@ -143,22 +169,28 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
   const [summaries, setSummaries] = useState<SummaryItem[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Medication timeline data
+  const [medTimeline, setMedTimeline] = useState<MedTimelineEntry[]>([])
+
   // UI
-  type View = 'overview' | 'detail' | 'summaries' | 'summary-detail'
+  type View = 'overview' | 'detail' | 'summaries' | 'summary-detail' | 'medications'
   const [view, setView] = useState<View>('overview')
   const [selectedTest, setSelectedTest] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<HealthTimeRange>('all')
   const [chartLoading, setChartLoading] = useState(false)
   const [selectedSummary, setSelectedSummary] = useState<SummaryItem | null>(null)
+  const [medTab, setMedTab] = useState<MedTab>('changes')
+  const [selectedMedDate, setSelectedMedDate] = useState<number | null>(null)
 
   // ─── Data fetching ─────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
       setLoading(true)
       try {
-        const [namesRes, summRes] = await Promise.all([
+        const [namesRes, summRes, medRes] = await Promise.all([
           fetch(`${API_BASE_URL}/api/test-results/names`),
           fetch(`${API_BASE_URL}/api/history?limit=50`),
+          fetch(`${API_BASE_URL}/api/medications/timeline`),
         ])
         if (namesRes.ok) {
           const names: TestName[] = await namesRes.json()
@@ -168,6 +200,10 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
         if (summRes.ok) {
           const data = await summRes.json()
           setSummaries(data.summaries || [])
+        }
+        if (medRes.ok) {
+          const data: MedTimelineEntry[] = await medRes.json()
+          setMedTimeline(data)
         }
       } catch {
         // silent
@@ -468,6 +504,336 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // MEDICATIONS VIEW — 3-tab detail
+  // ═══════════════════════════════════════════════════════════════════
+  if (view === 'medications' && medTimeline.length > 0) {
+    // Compute changes between latest and previous report
+    const latest = medTimeline[medTimeline.length - 1]
+    const previous = medTimeline.length > 1 ? medTimeline[medTimeline.length - 2] : null
+    const latestNames = new Set(latest.medications.map(m => m.name.toLowerCase()))
+    const prevNames = previous ? new Set(previous.medications.map(m => m.name.toLowerCase())) : new Set<string>()
+
+    const addedMeds = latest.medications.filter(m => !prevNames.has(m.name.toLowerCase()))
+    const droppedMeds = previous ? previous.medications.filter(m => !latestNames.has(m.name.toLowerCase())) : []
+    const continuedMeds = latest.medications.filter(m => prevNames.has(m.name.toLowerCase()))
+
+    // Dosage changes: for continued meds, compare dosages
+    const dosageChanges = continuedMeds.map(m => {
+      const prev = previous?.medications.find(p => p.name.toLowerCase() === m.name.toLowerCase())
+      return {
+        name: m.name,
+        currentDosage: m.dosage || '—',
+        previousDosage: prev?.dosage || '—',
+        changed: m.dosage !== prev?.dosage,
+      }
+    })
+
+    // Build dosage history for each medication in the latest report
+    const medDosageHistory = latest.medications.map(m => {
+      const history = medTimeline.map(entry => {
+        const match = entry.medications.find(em => em.name.toLowerCase() === m.name.toLowerCase())
+        if (!match?.dosage) return null
+        return {
+          date: entry.visit_date || entry.created_at,
+          dosage: match.dosage,
+          numericDosage: parseNumeric(match.dosage),
+        }
+      }).filter(Boolean) as Array<{ date: string; dosage: string; numericDosage: number }>
+      return { name: m.name, purpose: m.purpose, history }
+    }).filter(m => m.history.length > 0)
+
+    const tabItems: Array<{ key: MedTab; label: string; icon: typeof Plus }> = [
+      { key: 'changes', label: 'Changes', icon: Plus },
+      { key: 'dosage', label: 'Dosage Trends', icon: TrendingUp },
+      { key: 'history', label: 'History', icon: Clock },
+    ]
+
+    const formatDate = (d: string) => {
+      const dt = new Date(d)
+      return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    }
+
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <button
+          onClick={() => { setView('overview'); setSelectedMedDate(null) }}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition mb-6"
+        >
+          <ChevronLeft className="w-4 h-4" /> Back
+        </button>
+
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center">
+            <Pill className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-light text-gray-900">Medications</h2>
+            <p className="text-sm text-gray-400">Tracking across {medTimeline.length} report{medTimeline.length !== 1 ? 's' : ''}</p>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 mb-6">
+          {tabItems.map(tab => {
+            const Icon = tab.icon
+            return (
+              <button
+                key={tab.key}
+                onClick={() => { setMedTab(tab.key); setSelectedMedDate(null) }}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  medTab === tab.key
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* TAB 1: Changes — Added/Dropped */}
+        {medTab === 'changes' && (
+          <div className="space-y-6">
+            {!previous ? (
+              <div className="text-center py-8 text-gray-400 text-sm">
+                Only one report available. Upload more documents to see medication changes.
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-gray-400">
+                  Comparing latest report ({formatDate(latest.created_at)}) with previous ({formatDate(previous.created_at)})
+                </p>
+
+                {/* Newly Added */}
+                {addedMeds.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-green-700 mb-2 flex items-center gap-1.5">
+                      <Plus className="w-4 h-4" /> Newly Added
+                    </h4>
+                    <div className="space-y-2">
+                      {addedMeds.map(m => (
+                        <div key={m.id} className="p-4 rounded-2xl bg-green-50 border-2 border-green-200">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="font-semibold text-green-800">{m.name}</p>
+                              {m.purpose && <p className="text-xs text-green-600 mt-0.5">{m.purpose}</p>}
+                            </div>
+                            <div className="text-right">
+                              {m.dosage && <p className="text-sm font-bold text-green-700">{m.dosage}</p>}
+                              {m.frequency && <p className="text-xs text-green-500">{m.frequency}</p>}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Dropped */}
+                {droppedMeds.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-red-600 mb-2 flex items-center gap-1.5">
+                      <Minus className="w-4 h-4" /> Dropped
+                    </h4>
+                    <div className="space-y-2">
+                      {droppedMeds.map(m => (
+                        <div key={m.id} className="p-4 rounded-2xl bg-red-50 border-2 border-red-200">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="font-semibold text-red-700 line-through">{m.name}</p>
+                              {m.purpose && <p className="text-xs text-red-500 mt-0.5">{m.purpose}</p>}
+                            </div>
+                            <div className="text-right">
+                              {m.dosage && <p className="text-sm font-bold text-red-600">{m.dosage}</p>}
+                              {m.frequency && <p className="text-xs text-red-400">{m.frequency}</p>}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Continued with dosage changes */}
+                {continuedMeds.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Continued</h4>
+                    <div className="space-y-2">
+                      {dosageChanges.map(m => (
+                        <div
+                          key={m.name}
+                          className={`p-4 rounded-2xl border-2 ${
+                            m.changed ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-100'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <p className="font-medium text-gray-800">{m.name}</p>
+                            <div className="text-right">
+                              {m.changed ? (
+                                <div className="flex items-center gap-2 text-sm">
+                                  <span className="text-gray-400 line-through">{m.previousDosage}</span>
+                                  <span className="text-yellow-700 font-bold">{m.currentDosage}</span>
+                                </div>
+                              ) : (
+                                <span className="text-sm text-gray-500">{m.currentDosage}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {addedMeds.length === 0 && droppedMeds.length === 0 && !dosageChanges.some(d => d.changed) && (
+                  <div className="text-center py-6 text-gray-400 text-sm">
+                    No medication changes between your last two reports.
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: Dosage Trends — charts for each medication */}
+        {medTab === 'dosage' && (
+          <div className="space-y-4">
+            {medDosageHistory.length === 0 ? (
+              <div className="text-center py-8 text-gray-400 text-sm">
+                No dosage data available to chart.
+              </div>
+            ) : (
+              medDosageHistory.map(med => {
+                const vals = med.history.map(h => h.numericDosage)
+                const min = Math.min(...vals)
+                const max = Math.max(...vals)
+                const range = max - min || 1
+                const svgW = 400, svgH = 100
+                const pad = { top: 16, right: 16, bottom: 24, left: 40 }
+                const iW = svgW - pad.left - pad.right
+                const iH = svgH - pad.top - pad.bottom
+
+                const pts = med.history.map((h, i) => ({
+                  x: pad.left + (med.history.length > 1 ? (i / (med.history.length - 1)) * iW : iW / 2),
+                  y: pad.top + iH - ((h.numericDosage - min) / range) * iH,
+                  h,
+                }))
+                const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+                const area = pts.length > 0
+                  ? line + ` L${pts[pts.length - 1].x},${pad.top + iH} L${pts[0].x},${pad.top + iH} Z`
+                  : ''
+
+                return (
+                  <div key={med.name} className="rounded-2xl border border-gray-100 bg-white p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{med.name}</p>
+                        {med.purpose && <p className="text-xs text-gray-400">{med.purpose}</p>}
+                      </div>
+                      <p className="text-lg font-bold text-blue-600">
+                        {med.history[med.history.length - 1].dosage}
+                      </p>
+                    </div>
+                    {med.history.length >= 2 ? (
+                      <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-auto">
+                        <defs>
+                          <linearGradient id={`mg-${med.name.replace(/\s/g, '')}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
+                            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.02" />
+                          </linearGradient>
+                        </defs>
+                        {/* Grid */}
+                        {[min, (min + max) / 2, max].map(val => {
+                          const y = pad.top + iH - ((val - min) / range) * iH
+                          return (
+                            <g key={val}>
+                              <line x1={pad.left} x2={svgW - pad.right} y1={y} y2={y} stroke="#f0f0f0" strokeDasharray="3 2" />
+                              <text x={pad.left - 6} y={y + 3} textAnchor="end" className="text-[9px] fill-gray-400">{Math.round(val)}</text>
+                            </g>
+                          )
+                        })}
+                        <path d={area} fill={`url(#mg-${med.name.replace(/\s/g, '')})`} />
+                        <path d={line} fill="none" stroke="#3b82f6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                        {pts.map((p, i) => (
+                          <g key={i}>
+                            <circle cx={p.x} cy={p.y} r={3.5} fill="#3b82f6" stroke="#fff" strokeWidth={1.5} />
+                            <text x={p.x} y={p.y - 8} textAnchor="middle" className="text-[8px] fill-gray-600 font-semibold">
+                              {p.h.dosage}
+                            </text>
+                            <text x={p.x} y={svgH - 6} textAnchor="middle" className="text-[7px] fill-gray-400">
+                              {new Date(p.h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </text>
+                          </g>
+                        ))}
+                      </svg>
+                    ) : (
+                      <p className="text-xs text-gray-400 text-center py-3">Only one data point — more reports will show a trend.</p>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        )}
+
+        {/* TAB 3: History — click a date to see meds */}
+        {medTab === 'history' && (
+          <div className="space-y-3">
+            {[...medTimeline].reverse().map((entry) => {
+              const isOpen = selectedMedDate === entry.summary_id
+              const dt = formatDate(entry.visit_date || entry.created_at)
+              return (
+                <div key={entry.summary_id}>
+                  <button
+                    onClick={() => setSelectedMedDate(isOpen ? null : entry.summary_id)}
+                    className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${
+                      isOpen
+                        ? 'border-blue-300 bg-blue-50'
+                        : 'border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{dt}</p>
+                        {entry.diagnosis && (
+                          <p className="text-xs text-gray-500 mt-0.5">{entry.diagnosis}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">
+                          {entry.medications.length} med{entry.medications.length !== 1 ? 's' : ''}
+                        </span>
+                        <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                      </div>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="mt-2 ml-4 pl-4 border-l-2 border-blue-200 space-y-2 py-2">
+                      {entry.medications.map(m => (
+                        <div key={m.id} className="flex items-start gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1.5 shrink-0" />
+                          <div>
+                            <span className="text-sm font-medium text-gray-800">{m.name}</span>
+                            {m.dosage && <span className="text-sm text-gray-500"> — {m.dosage}</span>}
+                            {m.frequency && <span className="text-xs text-gray-400 ml-1">({m.frequency})</span>}
+                            {m.purpose && <p className="text-xs text-gray-400 mt-0.5">{m.purpose}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // SUMMARY DETAIL — full summary modal
   // ═══════════════════════════════════════════════════════════════════
   if (view === 'summary-detail' && selectedSummary) {
@@ -679,9 +1045,10 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
         </>
       )}
 
-      {/* What Happened card */}
-      {summaries.length > 0 && (
-        <div className="mt-10">
+      {/* Bottom cards: What Happened + Medications */}
+      <div className="mt-10 space-y-3">
+        {/* What Happened card */}
+        {summaries.length > 0 && (
           <button
             onClick={() => setView('summaries')}
             className="w-full flex items-center gap-4 p-5 rounded-2xl bg-gradient-to-r from-[#8BC34A]/5 to-[#8BC34A]/10 border-2 border-[#8BC34A]/20 hover:shadow-md hover:border-[#8BC34A]/30 transition-all text-left"
@@ -697,8 +1064,27 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
             </div>
             <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />
           </button>
-        </div>
-      )}
+        )}
+
+        {/* Medications card */}
+        {medTimeline.length > 0 && (
+          <button
+            onClick={() => { setView('medications'); setMedTab('changes') }}
+            className="w-full flex items-center gap-4 p-5 rounded-2xl bg-gradient-to-r from-blue-50 to-blue-100/50 border-2 border-blue-200/50 hover:shadow-md hover:border-blue-300/50 transition-all text-left"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-blue-100 flex items-center justify-center shrink-0">
+              <Pill className="w-6 h-6 text-blue-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-base font-semibold text-gray-900">Medications</p>
+              <p className="text-sm text-gray-500 line-clamp-1 mt-0.5">
+                {medTimeline[medTimeline.length - 1].medications.length} current medication{medTimeline[medTimeline.length - 1].medications.length !== 1 ? 's' : ''} · Track changes & dosages
+              </p>
+            </div>
+            <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />
+          </button>
+        )}
+      </div>
     </div>
   )
 }
