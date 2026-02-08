@@ -204,11 +204,16 @@ FORMAT YOUR RESPONSE EXACTLY AS FOLLOWS:
 Example: "Lisinopril (blood pressure pill) - Take one tablet every morning"]
 
 ## 🔬 Test Results
-[Present test results in simple terms:
+[Present ALL test results with their values, units, and reference ranges:
 - Mark normal results with ✓
 - Mark abnormal results with ⚠️
-- Explain what each test measures
-Example: "Blood sugar: 95 ✓ (Normal - good control!)"]
+- Include the numeric value with units
+- Include the normal/reference range from the document
+- Explain what each test measures briefly
+Format each result as: "Test Name: value unit (Reference: range) ✓/⚠️ - brief explanation"
+Example: "Blood Sugar: 95 mg/dL (Reference: 70-99 mg/dL) ✓ - Good control!"
+Example: "LDL Cholesterol: 101 mg/dL (Reference: < 100 mg/dL) ⚠️ - Slightly elevated"
+IMPORTANT: Always include the reference/normal range if it appears in the document]
 
 ## 📅 What to Do Next
 [List follow-up care instructions:
@@ -577,15 +582,15 @@ async def extract_test_results(request: ExtractMedicationsRequest):
 
 For each test result, extract:
 - name: The test name (e.g., "Blood Sugar", "Cholesterol", "Blood Pressure")
-- value: The numeric value as a string (e.g., "95", "120/80", "5.6")
+- value: The numeric value as a string (e.g., "95", "120/80", "5.6"). Do NOT include units in the value.
 - unit: The unit of measurement (e.g., "mg/dL", "mmHg", "%"). Use null if not mentioned.
-- reference_range: The normal/reference range exactly as stated in the summary (e.g., "70-100", "< 200", "> 60", "0.4 - 4.0"). Use null if not mentioned.
+- reference_range: The normal/reference range as stated in the summary (e.g., "70-99", "< 200", "> 60", "0.4-4.0", "70-99 mg/dL"). Extract from text like "(Reference: 70-99 mg/dL)" or "(Normal: < 200)". Use null if not mentioned.
 - status: One of "normal", "borderline", or "abnormal"
 - explanation: Brief explanation if provided (e.g., "Good control", "Slightly elevated")
 
 Return ONLY a JSON array with no additional text. Format:
 [
-  {"name": "Test Name", "value": "95", "unit": "mg/dL", "reference_range": "70-100", "status": "normal", "explanation": "optional explanation"},
+  {"name": "Test Name", "value": "95", "unit": "mg/dL", "reference_range": "70-99 mg/dL", "status": "normal", "explanation": "optional explanation"},
   ...
 ]
 
