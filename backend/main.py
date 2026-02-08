@@ -204,16 +204,18 @@ FORMAT YOUR RESPONSE EXACTLY AS FOLLOWS:
 Example: "Lisinopril (blood pressure pill) - Take one tablet every morning"]
 
 ## 🔬 Test Results
-[Present ALL test results with their values, units, and reference ranges:
+[Present EVERY SINGLE test result INDIVIDUALLY with its value, units, and reference range.
+CRITICAL: List each test on its own line. NEVER group tests together (e.g., do NOT write "Routine Blood Counts" or "CBC panel was normal"). Instead, list WBC, RBC, Hemoglobin, Hematocrit, Platelets, etc. as separate entries.
 - Mark normal results with ✓
 - Mark abnormal results with ⚠️
 - Include the numeric value with units
 - Include the normal/reference range from the document
 - Explain what each test measures briefly
-Format each result as: "Test Name: value unit (Reference: range) ✓/⚠️ - brief explanation"
-Example: "Blood Sugar: 95 mg/dL (Reference: 70-99 mg/dL) ✓ - Good control!"
-Example: "LDL Cholesterol: 101 mg/dL (Reference: < 100 mg/dL) ⚠️ - Slightly elevated"
-IMPORTANT: Always include the reference/normal range if it appears in the document]
+Format each result as: "- Test Name: value unit (Reference: range) ✓/⚠️ - brief explanation"
+Example: "- WBC: 9.5 x10^9/L (Reference: 4.0-11.0 x10^9/L) ✓ - White blood cell count is normal"
+Example: "- LDL Cholesterol: 101 mg/dL (Reference: < 100 mg/dL) ⚠️ - Slightly elevated"
+Example: "- Troponin I: 2.25 ng/mL (Reference: < 0.04 ng/mL) ⚠️ - Elevated, may indicate heart damage"
+IMPORTANT: Always include the reference/normal range if it appears in the document. List ALL tests individually - never summarize or group them.]
 
 ## 📅 What to Do Next
 [List follow-up care instructions:
@@ -580,17 +582,21 @@ async def extract_test_results(request: ExtractMedicationsRequest):
     try:
         prompt = """Analyze the following medical summary and extract ALL test results mentioned.
 
-For each test result, extract:
-- name: The test name (e.g., "Blood Sugar", "Cholesterol", "Blood Pressure")
-- value: The numeric value as a string (e.g., "95", "120/80", "5.6"). Do NOT include units in the value.
-- unit: The unit of measurement (e.g., "mg/dL", "mmHg", "%"). Use null if not mentioned.
-- reference_range: The normal/reference range as stated in the summary (e.g., "70-99", "< 200", "> 60", "0.4-4.0", "70-99 mg/dL"). Extract from text like "(Reference: 70-99 mg/dL)" or "(Normal: < 200)". Use null if not mentioned.
+CRITICAL: Extract each test result as its OWN separate entry. NEVER combine or group tests.
+For example, if the summary mentions WBC, RBC, Hemoglobin, Hematocrit, and Platelets, create 5 separate entries — one for each test. Do NOT create a single "CBC" or "Routine Blood Counts" entry.
+
+For each individual test result, extract:
+- name: The specific test name (e.g., "WBC", "Hemoglobin", "LDL Cholesterol", "Troponin I", "Glucose"). Use the individual test name, NOT the panel name.
+- value: The numeric value as a string (e.g., "9.5", "14.2", "101"). Do NOT include units in the value.
+- unit: The unit of measurement (e.g., "mg/dL", "x10^9/L", "%", "mmol/L"). Use null if not mentioned.
+- reference_range: The normal/reference range (e.g., "4.0-11.0 x10^9/L", "< 100 mg/dL", "> 60 mL/min", "0.4-4.0 mIU/L"). Extract from text like "(Reference: ...)" or "(Normal: ...)". Use null if not mentioned.
 - status: One of "normal", "borderline", or "abnormal"
 - explanation: Brief explanation if provided (e.g., "Good control", "Slightly elevated")
 
 Return ONLY a JSON array with no additional text. Format:
 [
-  {"name": "Test Name", "value": "95", "unit": "mg/dL", "reference_range": "70-99 mg/dL", "status": "normal", "explanation": "optional explanation"},
+  {"name": "WBC", "value": "9.5", "unit": "x10^9/L", "reference_range": "4.0-11.0 x10^9/L", "status": "normal", "explanation": "White blood cell count is normal"},
+  {"name": "Troponin I", "value": "2.25", "unit": "ng/mL", "reference_range": "< 0.04 ng/mL", "status": "abnormal", "explanation": "Elevated, may indicate heart damage"},
   ...
 ]
 
