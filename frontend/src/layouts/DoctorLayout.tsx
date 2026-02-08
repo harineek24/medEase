@@ -7,16 +7,20 @@ import {
   Settings,
   LogOut,
   Stethoscope,
+  LayoutDashboard,
+  Clock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 
 const navItems = [
-  { to: '/doctor',        icon: Newspaper,    label: 'Feed',         end: true },
-  { to: '/doctor/patients',    icon: Users,        label: 'Patients',     end: false },
-  { to: '/doctor/appointments', icon: CalendarDays, label: 'Appointments', end: false },
-  { to: '/doctor/notes',       icon: FileText,     label: 'Notes',        end: false },
-  { to: '/doctor/settings',    icon: Settings,     label: 'Settings',     end: false },
+  { to: '/doctor',             icon: Newspaper,       label: 'Feed',         end: true },
+  { to: '/doctor/dashboard',   icon: LayoutDashboard, label: 'Dashboard',    end: false },
+  { to: '/doctor/patients',    icon: Users,           label: 'Patients',     end: false },
+  { to: '/doctor/history',     icon: Clock,           label: 'History',      end: false },
+  { to: '/doctor/appointments', icon: CalendarDays,   label: 'Appointments', end: false },
+  { to: '/doctor/notes',       icon: FileText,        label: 'Notes',        end: false },
+  { to: '/doctor/settings',    icon: Settings,        label: 'Settings',     end: false },
 ]
 
 export default function DoctorLayout() {

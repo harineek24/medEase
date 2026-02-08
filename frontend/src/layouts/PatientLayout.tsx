@@ -1,11 +1,9 @@
 import { useState } from 'react'
 import {
   Upload,
-  LayoutDashboard,
   Clock,
   MessageSquare,
   Mic,
-  Settings,
   Bell,
   Heart,
   LogOut,
@@ -22,13 +20,11 @@ export default function PatientLayout() {
 
   const navItems: Array<{ view: PatientView; icon: typeof Upload; label: string }> = [
     { view: 'upload',    icon: Upload,          label: 'Upload' },
-    { view: 'dashboard', icon: LayoutDashboard,  label: 'Dashboard' },
     { view: 'history',   icon: Clock,            label: 'History' },
     { view: 'chat',      icon: MessageSquare,    label: 'AI Chat' },
     { view: 'consult',   icon: Mic,              label: 'Live Consult' },
     { view: 'updates',   icon: Bell,             label: 'Updates' },
     { view: 'health',    icon: Heart,            label: 'Health' },
-    { view: 'config',    icon: Settings,         label: 'Config' },
   ]
 
   return (

@@ -6,10 +6,9 @@ import './App.css'
 // Import components
 import PatientChat from './components/PatientChat'
 import GeneralChat from './components/GeneralChat'
-import Dashboard from './components/Dashboard'
 import HealthHistory from './components/patient/HealthHistory'
+import PatientUpdates from './components/patient/PatientUpdates'
 import VoiceConsult from './components/VoiceConsult'
-import ConsultConfig from './components/ConsultConfig'
 import { HelixScene } from './components/ui/helix-scene'
 import { Ripple } from './components/ui/material-design-3-ripple'
 import BlurEffect from 'react-progressive-blur'
@@ -791,9 +790,6 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
   // Render the appropriate view
   const renderView = () => {
     switch (currentView) {
-      case 'dashboard':
-        return <Dashboard onViewHistory={() => onNavigate('history')} />
-
       case 'history':
         return <HealthHistory onNavigate={(v) => onNavigate(v as PatientView)} />
 
@@ -803,18 +799,8 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
       case 'consult':
         return <VoiceConsult />
 
-      case 'config':
-        return <ConsultConfig />
-
       case 'updates':
-        return (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <div className="text-center">
-              <h2 className="text-2xl font-light text-gray-900 mb-2">Updates</h2>
-              <p className="text-gray-500 text-sm">Coming soon.</p>
-            </div>
-          </div>
-        )
+        return <PatientUpdates />
 
       case 'health':
         return renderHealthView()

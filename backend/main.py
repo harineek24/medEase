@@ -1691,6 +1691,12 @@ class MarkNotesReadRequest(BaseModel):
     pass  # No body needed, patient_id comes from path
 
 
+class PatientUpdateRequest(BaseModel):
+    patient_id: int = 1
+    update_text: str
+    audio_duration: Optional[int] = None
+
+
 # =============================================================================
 # ClinicAdmin Endpoints (/api/clinicadmin/)
 # =============================================================================
@@ -2237,6 +2243,95 @@ async def get_test_names():
         return JSONResponse(content=names)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching test names: {str(e)}")
+
+
+# =============================================================================
+# Patient Health Updates Endpoints
+# =============================================================================
+
+@app.post("/api/patient-updates")
+async def create_patient_update(request: PatientUpdateRequest):
+    """Create a patient health update with LLM summary."""
+    try:
+        # Generate bullet-point summary using Gemini
+        prompt = f"""Analyze this patient health update and provide:
+1. A concise bullet-point summary of the key health information
+2. A list of any questions the patient is asking or concerns they're raising
+
+Format your response EXACTLY as:
+SUMMARY:
+- bullet point 1
+- bullet point 2
+...
+
+QUESTIONS:
+- question 1
+- question 2
+...
+
+If there are no questions, write "QUESTIONS:\n- None"
+
+Patient update:
+{request.update_text}"""
+
+        response = model.generate_content(prompt)
+        ai_response = response.text.strip()
+
+        # Parse summary and questions
+        summary = ""
+        questions = ""
+        if "QUESTIONS:" in ai_response:
+            parts = ai_response.split("QUESTIONS:")
+            summary = parts[0].replace("SUMMARY:", "").strip()
+            questions = parts[1].strip()
+        else:
+            summary = ai_response.replace("SUMMARY:", "").strip()
+            questions = "- None"
+
+        # Save to database
+        update_id = db.add_patient_update(
+            patient_id=request.patient_id,
+            update_text=request.update_text,
+            audio_duration=request.audio_duration,
+            summary=summary,
+            questions=questions
+        )
+
+        return JSONResponse(content={
+            "id": update_id,
+            "summary": summary,
+            "questions": questions,
+            "created_at": datetime.now().isoformat()
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating update: {str(e)}")
+
+
+@app.get("/api/patient-updates/{patient_id}")
+async def get_patient_updates_endpoint(patient_id: int, limit: int = 50):
+    """Get patient health updates."""
+    try:
+        updates = db.get_patient_updates(patient_id, limit)
+        return JSONResponse(content=updates)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching updates: {str(e)}")
+
+
+@app.post("/api/patient-updates/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe audio to text using Gemini."""
+    try:
+        file_content = await file.read()
+        file_base64 = base64.b64encode(file_content).decode('utf-8')
+
+        response = model.generate_content([
+            "Transcribe this audio recording exactly. Return only the transcription text, nothing else.",
+            {"mime_type": "audio/webm", "data": file_base64}
+        ])
+
+        return JSONResponse(content={"text": response.text.strip()})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error transcribing: {str(e)}")
 
 
 if __name__ == "__main__":

@@ -431,6 +431,21 @@ def init_database():
             )
         """)
 
+        # Patient updates table - stores text/voice health updates with LLM summaries
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS patient_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                update_text TEXT,
+                audio_url TEXT,
+                audio_duration INTEGER,
+                summary TEXT,
+                questions TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id)
+            )
+        """)
+
         print("Database initialized successfully!")
 
         # Seed sample data if tables are empty
@@ -2651,6 +2666,32 @@ def get_clinic_admin_stats(clinic_id: int = None) -> Dict:
             "appointment_stats": apt_stats,
             "billing_summary": bill_summary
         }
+
+
+# =============================================================================
+# Patient Updates (Health Updates with LLM Summaries)
+# =============================================================================
+
+def add_patient_update(patient_id: int, update_text: str = None, audio_url: str = None, audio_duration: int = None, summary: str = None, questions: str = None) -> int:
+    """Add a patient health update."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO patient_updates (patient_id, update_text, audio_url, audio_duration, summary, questions)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (patient_id, update_text, audio_url, audio_duration, summary, questions))
+        return cursor.lastrowid
+
+
+def get_patient_updates(patient_id: int, limit: int = 50) -> list:
+    """Get patient health updates."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM patient_updates WHERE patient_id = ?
+            ORDER BY created_at DESC LIMIT ?
+        """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
 
 
 # Initialize database on module import
