@@ -12,6 +12,7 @@ import DoctorFeed from '@/components/doctor/DoctorFeed'
 import DoctorReplyPage from '@/components/doctor/DoctorReplyPage'
 import AdminPatientRegistration from '@/components/clinicadmin/AdminPatientRegistration'
 import AdminDoctorManagement from '@/components/clinicadmin/AdminDoctorManagement'
+import { Clock } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 /* ------------------------------------------------------------------ */
@@ -46,8 +47,11 @@ function PlaceholderPage({ title }: { title: string }) {
   return (
     <div className="flex items-center justify-center h-full min-h-[60vh]">
       <div className="text-center">
-        <h2 className="text-2xl font-light text-gray-900 mb-2">{title}</h2>
-        <p className="text-gray-500 text-sm">This section is under development.</p>
+        <div className="w-12 h-12 rounded-full bg-[#45BFD3]/10 flex items-center justify-center mx-auto mb-4">
+          <Clock className="w-6 h-6 text-[#45BFD3]" />
+        </div>
+        <h2 className="text-2xl font-light text-gray-900 mb-1">{title}</h2>
+        <p className="text-gray-400 text-sm">Coming soon</p>
       </div>
     </div>
   )
