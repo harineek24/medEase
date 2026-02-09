@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { API_BASE_URL, WS_BASE_URL } from '../api'
-import { Phone, PhoneOff, FileText } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
+import { Phone, PhoneOff, FileText, Check } from 'lucide-react'
 
 // Stethoscope Heart Component
 const StethoscopeHeart = ({ state }: { state: 'idle' | 'listening' | 'speaking' | 'thinking' }) => {
@@ -99,10 +100,13 @@ interface PendingField {
 type DoctorState = 'idle' | 'listening' | 'speaking' | 'thinking'
 
 function VoiceConsult() {
+  const { patientId } = useAuth()
+
   // Session state
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
+  const [summarySaved, setSummarySaved] = useState(false)
 
   // Doctor state
   const [doctorState, setDoctorState] = useState<DoctorState>('idle')
@@ -259,7 +263,9 @@ function VoiceConsult() {
 
       // Start a new session
       const response = await fetch(`${API_BASE_URL}/api/consult/start`, {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patient_id: patientId || null })
       })
 
       if (!response.ok) throw new Error('Failed to start session')
@@ -474,7 +480,7 @@ function VoiceConsult() {
     setIsEditing(true)
   }
 
-  // Get summary
+  // Get summary — generates, saves to DB, and downloads
   const getSummary = async () => {
     if (!sessionId) return
 
@@ -487,7 +493,13 @@ function VoiceConsult() {
 
       if (response.ok) {
         const data = await response.json()
-        // Download summary
+
+        // Show saved confirmation
+        if (data.saved) {
+          setSummarySaved(true)
+        }
+
+        // Also download a copy
         const blob = new Blob([data.summary], { type: 'text/plain' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
@@ -635,12 +647,25 @@ function VoiceConsult() {
                   <span>End Session</span>
                 </button>
                 <button
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl transition-all duration-200 disabled:opacity-50"
+                  className={`w-full flex items-center justify-center gap-2 px-6 py-3 font-medium rounded-xl transition-all duration-200 disabled:opacity-50 ${
+                    summarySaved
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                  }`}
                   onClick={getSummary}
-                  disabled={fields.length === 0}
+                  disabled={fields.length === 0 || summarySaved}
                 >
-                  <FileText className="w-5 h-5" />
-                  <span>Get Summary</span>
+                  {summarySaved ? (
+                    <>
+                      <Check className="w-5 h-5" />
+                      <span>Summary Saved</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="w-5 h-5" />
+                      <span>Get Summary</span>
+                    </>
+                  )}
                 </button>
               </>
             )}

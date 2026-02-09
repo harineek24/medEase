@@ -142,6 +142,10 @@ class ConsultationSummaryRequest(BaseModel):
     session_id: str
 
 
+class StartConsultationRequest(BaseModel):
+    patient_id: Optional[int] = None
+
+
 # Patient record models
 class CreatePatientRequest(BaseModel):
     name: str
@@ -1026,14 +1030,47 @@ async def doctor_consult_endpoint(request: DoctorConsultRequest):
 @app.post("/api/consult/summary")
 async def get_consultation_summary(request: ConsultationSummaryRequest):
     """
-    Generate a printable summary of the consultation session.
+    Generate a summary of the consultation session, save it to the database,
+    and mark the session as completed.
     """
     try:
         summary = await generate_consultation_summary(request.session_id)
 
+        # Look up consultation session and its fields
+        session = db.get_consultation_session(request.session_id)
+        if session:
+            patient_id = session.get("patient_id")
+
+            # Extract diagnosis from consultation fields
+            fields = session.get("fields", [])
+            diagnosis = None
+            patient_name = None
+            for f in fields:
+                if f.get("field_name") == "chief_complaint":
+                    diagnosis = f.get("field_value")
+                if f.get("field_name") == "patient_name":
+                    patient_name = f.get("field_value")
+
+            # Save summary to summaries table if we have a patient link
+            summary_id = None
+            if patient_id:
+                summary_id = db.create_summary(
+                    patient_id=patient_id,
+                    raw_summary=summary,
+                    original_filename="Voice Consultation",
+                    diagnosis=diagnosis,
+                    visit_date=datetime.now().strftime("%Y-%m-%d"),
+                )
+
+            # Mark session as completed
+            if session.get("status") != "completed":
+                db.update_consultation_session(request.session_id, status="completed")
+
         return JSONResponse(content={
             "summary": summary,
             "session_id": request.session_id,
+            "saved": summary_id is not None,
+            "summary_id": summary_id,
             "timestamp": datetime.now().isoformat()
         })
 
@@ -1042,15 +1079,17 @@ async def get_consultation_summary(request: ConsultationSummaryRequest):
 
 
 @app.post("/api/consult/start")
-async def start_consultation():
+async def start_consultation(request: StartConsultationRequest = None):
     """
     Start a new consultation session - generates a unique session ID.
     """
     import uuid
     session_id = f"consult_{uuid.uuid4().hex[:12]}"
 
-    # Create session in database
-    db.create_consultation_session(session_id)
+    patient_id = request.patient_id if request else None
+
+    # Create session in database with patient link
+    db.create_consultation_session(session_id, patient_id=patient_id)
 
     # Create session in voice service
     voice_service.create_session(session_id)
