@@ -508,12 +508,16 @@ COMPLETION RULES:
                                         "timestamp": datetime.now().isoformat()
                                     })
 
-                                # Handle tool calls
-                                await self._process_tool_calls(
+                                # Handle tool calls and send responses back
+                                fn_responses = await self._process_tool_calls(
                                     response, session,
                                     on_field_extracted, on_emergency,
                                     on_progress, on_complete
                                 )
+                                if fn_responses:
+                                    await self._send_tool_responses(
+                                        live_session, fn_responses
+                                    )
                         except asyncio.CancelledError:
                             break
                         except Exception as e:
@@ -544,9 +548,10 @@ COMPLETION RULES:
         on_emergency: Callable,
         on_progress: Optional[Callable],
         on_complete: Optional[Callable]
-    ):
-        """Process tool calls from Gemini response"""
+    ) -> List[Dict]:
+        """Process tool calls from Gemini response. Returns function response dicts for sending back."""
         calls = self._extract_tool_calls(response)
+        function_responses = []
 
         if calls:
             print(f"🔧 [Voice] Processing {len(calls)} tool call(s)")
@@ -554,6 +559,8 @@ COMPLETION RULES:
         for call in calls:
             name = call.get('name', '').strip()
             args = call.get('args', {})
+            call_id = call.get('id')
+            result = {}
 
             if name == 'save_field':
                 field_name = args.get('field_name') or args.get('fieldName')
@@ -574,13 +581,16 @@ COMPLETION RULES:
                             len(session.fields),
                             len(session.config.fields)
                         )
+                    result = {"saved": True, "field_name": field_name}
                 else:
                     print(f"⚠️ [Voice] save_field missing field_name or value: {args}")
+                    result = {"saved": False, "error": "missing field_name or value"}
 
             elif name == 'flag_emergency':
                 reason = args.get('reason', 'Emergency symptoms detected')
                 session.is_emergency = True
                 await on_emergency(reason)
+                result = {"flagged": True}
 
             elif name == 'submit_consultation_summary':
                 summary_text = args.get('summary_text', '')
@@ -592,6 +602,7 @@ COMPLETION RULES:
                     "content": f"Summary submitted: {summary_text}",
                     "timestamp": datetime.now().isoformat()
                 })
+                result = {"submitted": True}
 
             elif name == 'complete_consultation':
                 if on_complete:
@@ -602,6 +613,55 @@ COMPLETION RULES:
                         "is_emergency": session.is_emergency,
                         "completion_percentage": session.get_completion_percentage()
                     })
+                result = {"completed": True}
+
+            # Build function response to send back to Gemini
+            if name:
+                function_responses.append({
+                    "name": name,
+                    "id": call_id,
+                    "response": result
+                })
+
+        return function_responses
+
+    async def _send_tool_responses(self, live_session, fn_responses: List[Dict]):
+        """Send function call responses back to Gemini so it can continue calling tools."""
+        try:
+            from google.genai import types
+            responses = []
+            for r in fn_responses:
+                resp = types.FunctionResponse(
+                    name=r["name"],
+                    response=r["response"]
+                )
+                # Set id if available
+                if r.get("id"):
+                    resp.id = r["id"]
+                responses.append(resp)
+
+            if responses:
+                print(f"📨 [Voice] Sending {len(responses)} tool response(s) back to Gemini")
+                await live_session.send_tool_response(function_responses=responses)
+        except Exception as e:
+            print(f"⚠️ [Voice] Error sending tool responses: {e}")
+            # Fallback: try alternative SDK patterns
+            try:
+                from google.genai import types
+                tool_resp = types.LiveClientToolResponse(
+                    function_responses=[
+                        types.FunctionResponse(
+                            name=r["name"],
+                            id=r.get("id"),
+                            response=r["response"]
+                        )
+                        for r in fn_responses
+                    ]
+                )
+                await live_session.send(input=tool_resp)
+                print(f"📨 [Voice] Tool responses sent via fallback method")
+            except Exception as e2:
+                print(f"❌ [Voice] Fallback tool response also failed: {e2}")
 
     def _extract_tool_calls(self, response) -> List[Dict]:
         """
@@ -609,6 +669,21 @@ COMPLETION RULES:
         Matching voicegen reference implementation
         """
         calls = []
+        seen = set()  # Deduplicate across extraction paths
+
+        def _add_call(fc):
+            name = getattr(fc, 'name', None)
+            args = getattr(fc, 'args', None) or {}
+            call_id = getattr(fc, 'id', None)
+            if name:
+                key = (name, str(args), call_id)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append({
+                        'name': name,
+                        'args': args if isinstance(args, dict) else {},
+                        'id': call_id
+                    })
 
         try:
             # Direct tool_call attribute
@@ -617,25 +692,16 @@ COMPLETION RULES:
                 fc_list = getattr(tc, 'function_calls', None) or getattr(tc, 'tool_calls', None)
                 if fc_list and isinstance(fc_list, (list, tuple)):
                     for fc in fc_list:
-                        name = getattr(fc, 'name', None)
-                        args = getattr(fc, 'args', None) or {}
-                        if name:
-                            calls.append({'name': name, 'args': args if isinstance(args, dict) else {}})
+                        _add_call(fc)
                 else:
-                    name = getattr(tc, 'name', None)
-                    args = getattr(tc, 'args', None) or {}
-                    if name:
-                        calls.append({'name': name, 'args': args if isinstance(args, dict) else {}})
+                    _add_call(tc)
 
             # Plural attributes on response
             for attr in ('function_calls', 'tool_calls'):
                 fc_list = getattr(response, attr, None)
                 if fc_list and isinstance(fc_list, (list, tuple)):
                     for fc in fc_list:
-                        name = getattr(fc, 'name', None)
-                        args = getattr(fc, 'args', None) or {}
-                        if name:
-                            calls.append({'name': name, 'args': args if isinstance(args, dict) else {}})
+                        _add_call(fc)
 
             # server_content.model_turn.parts nested calls
             sc = getattr(response, 'server_content', None)
@@ -644,10 +710,7 @@ COMPLETION RULES:
                     for cand_attr in ('function_call', 'tool_call'):
                         fc = getattr(part, cand_attr, None)
                         if fc:
-                            name = getattr(fc, 'name', None)
-                            args = getattr(fc, 'args', None) or {}
-                            if name:
-                                calls.append({'name': name, 'args': args if isinstance(args, dict) else {}})
+                            _add_call(fc)
 
         except Exception as e:
             print(f"Error extracting tool calls: {e}")
