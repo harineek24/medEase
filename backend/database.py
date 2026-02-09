@@ -1813,6 +1813,43 @@ def get_all_consultations(limit: int = 50) -> List[Dict]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_consultations_for_doctor_today(doctor_id: int) -> list:
+    """Get today's completed consultations for a doctor's patients, with fields."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT cs.*, p.name as patient_name
+            FROM consultation_sessions cs
+            JOIN patients p ON p.id = cs.patient_id
+            WHERE cs.patient_id IN (
+                SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = ?
+            )
+            AND cs.status = 'completed'
+            AND date(cs.completed_at) = date('now')
+            ORDER BY cs.completed_at DESC
+        """, (doctor_id,))
+        sessions = [dict(row) for row in cursor.fetchall()]
+        for session in sessions:
+            session['fields'] = get_consultation_fields(session['session_id'])
+        return sessions
+
+
+def get_patient_consultations(patient_id: int, limit: int = 50) -> list:
+    """Get all completed consultations for a patient, with fields."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM consultation_sessions
+            WHERE patient_id = ? AND status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT ?
+        """, (patient_id, limit))
+        sessions = [dict(row) for row in cursor.fetchall()]
+        for session in sessions:
+            session['fields'] = get_consultation_fields(session['session_id'])
+        return sessions
+
+
 # =============================================================================
 # Clinic Operations
 # =============================================================================

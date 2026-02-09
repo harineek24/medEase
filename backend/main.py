@@ -2098,6 +2098,7 @@ async def doctor_patient_detail(doctor_id: int, patient_id: int):
         insurance = db.get_patient_insurance(patient_id)
         summaries = db.get_patient_summaries(patient_id)
         billing = db.get_patient_billing(patient_id)
+        consultations = db.get_patient_consultations(patient_id)
 
         return JSONResponse(content={
             "patient": patient,
@@ -2110,7 +2111,8 @@ async def doctor_patient_detail(doctor_id: int, patient_id: int):
             "journal_entries": journal,
             "insurance": insurance,
             "summaries": summaries,
-            "billing": billing
+            "billing": billing,
+            "consultations": consultations,
         })
     except HTTPException:
         raise
@@ -2591,6 +2593,26 @@ async def get_patient_doctor_replies(patient_id: int):
     try:
         replies = db.get_doctor_replies_for_patient(patient_id)
         return JSONResponse(content={"replies": replies})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/doctor/{doctor_id}/consultations/today")
+async def get_doctor_consultations_today(doctor_id: int):
+    """Get today's completed consultations for a doctor's patients."""
+    try:
+        consultations = db.get_consultations_for_doctor_today(doctor_id)
+        return JSONResponse(content={"consultations": consultations})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient/{patient_id}/consultations")
+async def get_patient_consultations_endpoint(patient_id: int):
+    """Get all consultations for a patient."""
+    try:
+        consultations = db.get_patient_consultations(patient_id)
+        return JSONResponse(content={"consultations": consultations})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

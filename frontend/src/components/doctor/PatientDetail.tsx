@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   XCircle,
   MessageCircle,
+  Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { API_BASE_URL } from "@/api";
@@ -78,6 +79,23 @@ interface LabResult {
   date: string;
 }
 
+interface ConsultField {
+  field_name: string;
+  field_label: string;
+  field_value: string;
+  confirmed: number;
+}
+
+interface ConsultationSession {
+  id: number;
+  session_id: string;
+  status: string;
+  is_emergency: number;
+  created_at: string;
+  completed_at: string;
+  fields: ConsultField[];
+}
+
 interface PatientDetailData {
   patient_id: number;
   patient_name: string;
@@ -95,6 +113,7 @@ interface PatientDetailData {
   notes: Note[];
   appointments: AppointmentRecord[];
   lab_results: LabResult[];
+  consultations?: ConsultationSession[];
 }
 
 interface PatientDetailProps {
@@ -114,6 +133,7 @@ const TABS = [
   { key: "appointments", label: "Appointments", icon: CalendarDays },
   { key: "labs", label: "Labs & Radiology", icon: FlaskConical },
   { key: "comms", label: "Communications", icon: MessageCircle },
+  { key: "consultations", label: "Consultations", icon: Mic },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -786,6 +806,94 @@ export default function PatientDetail({ doctorId, patientId }: PatientDetailProp
     );
   };
 
+  /* ---------------------------------------------------------------- */
+  /*  Consultations tab                                               */
+  /* ---------------------------------------------------------------- */
+
+  const renderConsultations = () => {
+    const sessions = data.consultations || [];
+
+    if (sessions.length === 0) {
+      return (
+        <div className="text-center py-16 text-gray-400">
+          <Mic className="w-10 h-10 mx-auto mb-3 opacity-50" />
+          <p className="text-sm">No consultations recorded for this patient.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {sessions.map((session) => (
+          <div
+            key={session.id}
+            className={`rounded-xl border overflow-hidden ${
+              session.is_emergency
+                ? "border-red-200 bg-red-50/30"
+                : "border-gray-100 bg-white"
+            }`}
+          >
+            {/* Header */}
+            <div
+              className={`px-5 py-3 flex items-center justify-between border-b ${
+                session.is_emergency
+                  ? "bg-red-50 border-red-100"
+                  : "bg-gray-50 border-gray-100"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Mic className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-medium text-gray-900">
+                  Voice Consultation
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                {session.is_emergency ? (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">
+                    Emergency
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">
+                    Completed
+                  </span>
+                )}
+                <span className="text-xs text-gray-400">
+                  {session.completed_at
+                    ? new Date(session.completed_at).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : new Date(session.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Fields */}
+            <div className="px-5 py-4">
+              {session.fields.length === 0 ? (
+                <p className="text-sm text-gray-400">No fields collected.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {session.fields.map((f, i) => (
+                    <div key={i}>
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                        {f.field_label}
+                      </p>
+                      <p className="text-sm text-gray-800 mt-0.5">{f.field_value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const tabContent: Record<TabKey, () => React.ReactNode> = {
     history: renderHistory,
     vitals: renderVitals,
@@ -794,6 +902,7 @@ export default function PatientDetail({ doctorId, patientId }: PatientDetailProp
     appointments: renderAppointments,
     labs: renderLabs,
     comms: renderComms,
+    consultations: renderConsultations,
   };
 
   /* ---------------------------------------------------------------- */
