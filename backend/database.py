@@ -446,6 +446,23 @@ def init_database():
             )
         """)
 
+        # Doctor replies to patient updates
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS doctor_replies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doctor_id INTEGER NOT NULL,
+                patient_id INTEGER NOT NULL,
+                update_id INTEGER NOT NULL,
+                reply_text TEXT,
+                audio_url TEXT,
+                audio_duration INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (doctor_id) REFERENCES doctors(id),
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (update_id) REFERENCES patient_updates(id)
+            )
+        """)
+
         print("Database initialized successfully!")
 
         # Migrate: add new doctor columns if missing
@@ -2773,6 +2790,95 @@ def get_patient_updates(patient_id: int, limit: int = 50) -> list:
             SELECT * FROM patient_updates WHERE patient_id = ?
             ORDER BY created_at DESC LIMIT ?
         """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_patient_update_by_id(update_id: int) -> dict:
+    """Get a single patient update by ID, with patient name."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pu.*, p.name as patient_name
+            FROM patient_updates pu
+            JOIN patients p ON p.id = pu.patient_id
+            WHERE pu.id = ?
+        """, (update_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_patient_updates_for_doctor(doctor_id: int, days: int = 7, limit: int = 50) -> list:
+    """Get patient updates for all patients of a doctor, within last N days."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pu.*, p.name as patient_name
+            FROM patient_updates pu
+            JOIN patients p ON p.id = pu.patient_id
+            WHERE pu.patient_id IN (
+                SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = ?
+            )
+            AND pu.created_at >= datetime('now', ?)
+            ORDER BY pu.created_at DESC
+            LIMIT ?
+        """, (doctor_id, f'-{days} days', limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def add_doctor_reply(doctor_id: int, patient_id: int, update_id: int,
+                     reply_text: str = None, audio_url: str = None,
+                     audio_duration: int = None) -> int:
+    """Add a doctor reply to a patient update."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO doctor_replies (doctor_id, patient_id, update_id, reply_text, audio_url, audio_duration)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (doctor_id, patient_id, update_id, reply_text, audio_url, audio_duration))
+        return cursor.lastrowid
+
+
+def get_replies_for_update(update_id: int) -> list:
+    """Get all doctor replies for a specific patient update."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT dr.*, d.first_name || ' ' || d.last_name as doctor_name
+            FROM doctor_replies dr
+            JOIN doctors d ON d.id = dr.doctor_id
+            WHERE dr.update_id = ?
+            ORDER BY dr.created_at ASC
+        """, (update_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_doctor_patient_communications(doctor_id: int, patient_id: int) -> list:
+    """Get all doctor replies to a specific patient, with original update context."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT dr.*, pu.update_text as original_update, pu.created_at as update_date
+            FROM doctor_replies dr
+            JOIN patient_updates pu ON pu.id = dr.update_id
+            WHERE dr.doctor_id = ? AND dr.patient_id = ?
+            ORDER BY dr.created_at DESC
+        """, (doctor_id, patient_id))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_doctor_replies_for_patient(patient_id: int) -> list:
+    """Get all doctor replies for a patient (for patient-side view)."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT dr.*, d.first_name || ' ' || d.last_name as doctor_name,
+                   pu.update_text as original_update
+            FROM doctor_replies dr
+            JOIN doctors d ON d.id = dr.doctor_id
+            JOIN patient_updates pu ON pu.id = dr.update_id
+            WHERE dr.patient_id = ?
+            ORDER BY dr.created_at DESC
+        """, (patient_id,))
         return [dict(row) for row in cursor.fetchall()]
 
 

@@ -66,7 +66,9 @@ export default function LoginPage() {
           return res.json()
         })
         .then((data) => {
-          setDoctors(Array.isArray(data) ? data : data.doctors || [])
+          const list = Array.isArray(data) ? data : data.doctors || []
+          setDoctors(list)
+          if (list.length > 0 && !selectedDoctorId) setSelectedDoctorId(list[0].id)
         })
         .catch(() => {
           setDoctorsError('Could not load doctors. Please try again.')
@@ -353,6 +355,9 @@ export default function LoginPage() {
                     <ChevronRight className="w-4 h-4" />
                     Enter Doctor Portal
                   </button>
+                  <p className="text-xs text-gray-400 mt-3 text-center">
+                    Default: Select first doctor (Dr. Sarah Chen)
+                  </p>
                 </div>
               )}
             </div>

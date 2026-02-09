@@ -1,71 +1,56 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Calendar,
-  Clock,
-  FileText,
-  ChevronRight,
-  Loader2,
-  AlertTriangle,
-  User,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { motion, type Variants } from "framer-motion";
+import { Loader2, MessageSquare, Clock, Mic, Play, Pause } from "lucide-react";
 import { API_BASE_URL } from "@/api";
-import StoryModal, { type StoryPatient } from "./StoryModal";
+import { useAuth } from "@/contexts/AuthContext";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface Story {
+interface PatientUpdate {
+  id: number;
   patient_id: number;
   patient_name: string;
-  latest_entry: string | null;
-  latest_mood: string | null;
-  today_entries: Array<{
-    entry_text: string;
-    mood: string;
-    symptoms: string[];
-    recorded_at: string;
-  }>;
-  viewed: boolean;
-}
-
-interface Appointment {
-  id: number;
-  patient_name: string;
-  time: string;
-  service: string;
-  status: "scheduled" | "completed" | "no_show";
-}
-
-interface Summary {
-  id: number;
-  patient_name: string;
-  diagnosis_snippet: string;
-  date: string;
-  content: string;
-}
-
-interface DoctorFeedProps {
-  doctorId: number;
+  update_text: string;
+  audio_url: string | null;
+  audio_duration: number | null;
+  summary: string | null;
+  questions: string | null;
+  created_at: string;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
+/*  Waveform animation variants (generated once)                       */
 /* ------------------------------------------------------------------ */
 
-const statusStyles: Record<string, string> = {
-  scheduled: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
-  no_show: "bg-red-100 text-red-700",
+const generateWaveVariants = (): Variants[] => {
+  const variants: Variants[] = [];
+  for (let i = 0; i < 24; i++) {
+    variants.push({
+      initial: { scaleY: 1 },
+      animate: {
+        scaleY: [1, Math.random() * 1.5 + 1, 1],
+        transition: {
+          duration: Math.random() * 0.5 + 0.4,
+          repeat: Infinity,
+          ease: "easeInOut",
+          delay: Math.random() * 0.3,
+        },
+      },
+    });
+  }
+  return variants;
 };
 
-const statusLabels: Record<string, string> = {
-  scheduled: "Scheduled",
-  completed: "Completed",
-  no_show: "No Show",
-};
+const waveVariants = generateWaveVariants();
+// Static heights for waveform bars (generated once)
+const barHeights = Array.from({ length: 24 }, () => Math.random() * 18 + 6);
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
 
 function initials(name: string) {
   return name
@@ -76,329 +61,255 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-/* ------------------------------------------------------------------ */
-/*  Section Wrapper                                                   */
-/* ------------------------------------------------------------------ */
+function timeAgo(dateStr: string) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
-function Section({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="space-y-3">
-      <div className="flex items-center gap-2 px-1">
-        {icon}
-        <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
-      </div>
-      {children}
-    </section>
-  );
+function formatDuration(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
+/*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function DoctorFeed({ doctorId }: DoctorFeedProps) {
-  /* State */
-  const [stories, setStories] = useState<Story[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [summaries, setSummaries] = useState<Summary[]>([]);
+export default function DoctorFeed() {
+  const { doctorId } = useAuth();
+  const navigate = useNavigate();
+  const [updates, setUpdates] = useState<PatientUpdate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [playingId, setPlayingId] = useState<number | null>(null);
+  const audioRefs = useRef<Map<number, HTMLAudioElement>>(new Map());
 
-  const [loadingStories, setLoadingStories] = useState(true);
-  const [loadingAppts, setLoadingAppts] = useState(true);
-  const [loadingSummaries, setLoadingSummaries] = useState(true);
-
-  const [errorStories, setErrorStories] = useState<string | null>(null);
-  const [errorAppts, setErrorAppts] = useState<string | null>(null);
-  const [errorSummaries, setErrorSummaries] = useState<string | null>(null);
-
-  const [selectedStory, setSelectedStory] = useState<StoryPatient | null>(null);
-  const [expandedSummary, setExpandedSummary] = useState<number | null>(null);
-
-  const storiesRef = useRef<HTMLDivElement>(null);
-
-  /* Fetchers */
-  const fetchStories = useCallback(async () => {
-    setLoadingStories(true);
-    setErrorStories(null);
+  const fetchUpdates = useCallback(async () => {
+    if (!doctorId) return;
+    setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/doctor/${doctorId}/feed/stories`);
+      const res = await fetch(
+        `${API_BASE_URL}/api/doctor/${doctorId}/feed/patient-updates`
+      );
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
-      setStories(Array.isArray(data) ? data : data.stories ?? []);
+      setUpdates(data.updates || []);
     } catch (err: any) {
-      setErrorStories(err.message || "Failed to load stories");
+      setError(err.message || "Failed to load updates");
     } finally {
-      setLoadingStories(false);
-    }
-  }, [doctorId]);
-
-  const fetchAppointments = useCallback(async () => {
-    setLoadingAppts(true);
-    setErrorAppts(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/doctor/${doctorId}/feed/appointments`);
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data = await res.json();
-      setAppointments(Array.isArray(data) ? data : data.appointments ?? []);
-    } catch (err: any) {
-      setErrorAppts(err.message || "Failed to load appointments");
-    } finally {
-      setLoadingAppts(false);
-    }
-  }, [doctorId]);
-
-  const fetchSummaries = useCallback(async () => {
-    setLoadingSummaries(true);
-    setErrorSummaries(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/doctor/${doctorId}/feed/summaries`);
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data = await res.json();
-      const list: Summary[] = Array.isArray(data) ? data : data.summaries ?? [];
-      list.sort((a, b) => a.patient_name.localeCompare(b.patient_name));
-      setSummaries(list);
-    } catch (err: any) {
-      setErrorSummaries(err.message || "Failed to load summaries");
-    } finally {
-      setLoadingSummaries(false);
+      setLoading(false);
     }
   }, [doctorId]);
 
   useEffect(() => {
-    fetchStories();
-    fetchAppointments();
-    fetchSummaries();
-  }, [fetchStories, fetchAppointments, fetchSummaries]);
+    fetchUpdates();
+  }, [fetchUpdates]);
 
-  /* Story click */
-  const openStory = (story: Story) => {
-    setSelectedStory({
-      patient_id: story.patient_id,
-      patient_name: story.patient_name,
-      latest_entry: story.latest_entry,
-      latest_mood: story.latest_mood,
-      today_entries: story.today_entries,
-    });
-    // Mark viewed locally
-    setStories((prev) =>
-      prev.map((s) => (s.patient_id === story.patient_id ? { ...s, viewed: true } : s))
-    );
+  // Cleanup audio on unmount
+  useEffect(() => {
+    const refs = audioRefs.current;
+    return () => {
+      refs.forEach((audio) => audio.pause());
+    };
+  }, []);
+
+  const handlePlay = (updateId: number, audioUrl: string) => {
+    // Stop currently playing
+    if (playingId !== null && playingId !== updateId) {
+      const current = audioRefs.current.get(playingId);
+      if (current) {
+        current.pause();
+        current.currentTime = 0;
+      }
+    }
+
+    let audio = audioRefs.current.get(updateId);
+    if (!audio) {
+      audio = new Audio(`${API_BASE_URL}${audioUrl}`);
+      audio.addEventListener("ended", () => setPlayingId(null));
+      audioRefs.current.set(updateId, audio);
+    }
+    audio.play().catch(console.error);
+    setPlayingId(updateId);
   };
 
-  /* ---------------------------------------------------------------- */
-  /*  Render helpers                                                  */
-  /* ---------------------------------------------------------------- */
+  const handlePause = (updateId: number) => {
+    const audio = audioRefs.current.get(updateId);
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    setPlayingId(null);
+  };
 
-  const LoadingBlock = () => (
-    <div className="flex items-center justify-center py-10">
-      <Loader2 className="h-6 w-6 animate-spin text-[#45BFD3]" />
-    </div>
-  );
-
-  const ErrorBlock = ({ msg }: { msg: string }) => (
-    <div className="flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      {msg}
-    </div>
-  );
+  const handleCardClick = (update: PatientUpdate) => {
+    if (playingId !== null) handlePause(playingId);
+    navigate(`/doctor/reply/${update.id}`);
+  };
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                          */
   /* ---------------------------------------------------------------- */
 
-  return (
-    <div className="space-y-8">
-      {/* ── Stories ── */}
-      <Section title="Patient Stories" icon={<User className="h-5 w-5 text-[#45BFD3]" />}>
-        {loadingStories ? (
-          <LoadingBlock />
-        ) : errorStories ? (
-          <ErrorBlock msg={errorStories} />
-        ) : stories.length === 0 ? (
-          <p className="text-sm text-gray-400 px-1">No patient stories today.</p>
-        ) : (
-          <div
-            ref={storiesRef}
-            className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-200"
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#45BFD3]" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <p className="text-red-500 mb-2">{error}</p>
+          <button
+            onClick={fetchUpdates}
+            className="text-sm text-[#45BFD3] hover:underline"
           >
-            {stories.map((story) => (
-              <button
-                key={story.patient_id}
-                onClick={() => openStory(story)}
-                className="flex flex-col items-center gap-1.5 shrink-0 group"
-              >
-                <div
-                  className={cn(
-                    "rounded-full p-[3px] transition-shadow",
-                    story.viewed
-                      ? "bg-gradient-to-tr from-gray-300 to-gray-400"
-                      : "bg-gradient-to-tr from-green-400 to-[#45BFD3]"
-                  )}
-                >
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-sm font-semibold text-gray-700 group-hover:bg-gray-50 transition-colors">
-                    {initials(story.patient_name)}
-                  </div>
-                </div>
-                <span className="text-xs text-gray-600 max-w-[72px] truncate">
-                  {story.patient_name.split(" ")[0]}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </Section>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-      {/* ── Today's Appointments ── */}
-      <Section title="Today's Appointments" icon={<Calendar className="h-5 w-5 text-[#45BFD3]" />}>
-        {loadingAppts ? (
-          <LoadingBlock />
-        ) : errorAppts ? (
-          <ErrorBlock msg={errorAppts} />
-        ) : appointments.length === 0 ? (
-          <p className="text-sm text-gray-400 px-1">No appointments today.</p>
-        ) : (
-          <div className="space-y-3">
-            {appointments.map((appt) => (
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+          Patient Feed
+        </h1>
+        <p className="text-gray-500 text-sm">
+          Recent health updates from your patients — click to respond
+        </p>
+      </div>
+
+      {updates.length === 0 ? (
+        <div className="text-center py-16">
+          <MessageSquare className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+          <p className="text-gray-400 text-sm">
+            No patient updates in the last 7 days
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-5">
+          {updates.map((update) => {
+            const isPlaying = playingId === update.id;
+
+            return (
               <motion.div
-                key={appt.id}
-                initial={{ opacity: 0, y: 10 }}
+                key={update.id}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-4 rounded-xl bg-white p-4 shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+                className="bg-white border border-gray-200 w-80 rounded-2xl p-5 cursor-pointer hover:shadow-lg transition-shadow"
+                onClick={() => handleCardClick(update)}
               >
-                {/* Time */}
-                <div className="flex flex-col items-center shrink-0 w-16">
-                  <Clock className="h-4 w-4 text-gray-400 mb-1" />
-                  <span className="text-sm font-semibold text-gray-900">
-                    {new Date(appt.time).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </div>
-
-                {/* Divider */}
-                <div className="w-px h-10 bg-gray-200" />
-
-                {/* Details */}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{appt.patient_name}</p>
-                  <p className="text-sm text-gray-500 truncate">{appt.service}</p>
-                </div>
-
-                {/* Status badge */}
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium shrink-0",
-                    statusStyles[appt.status] ?? "bg-gray-100 text-gray-600"
-                  )}
-                >
-                  {statusLabels[appt.status] ?? appt.status}
-                </span>
-              </motion.div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* ── Patient Summaries ── */}
-      <Section title="Patient Summaries" icon={<FileText className="h-5 w-5 text-[#45BFD3]" />}>
-        {loadingSummaries ? (
-          <LoadingBlock />
-        ) : errorSummaries ? (
-          <ErrorBlock msg={errorSummaries} />
-        ) : summaries.length === 0 ? (
-          <p className="text-sm text-gray-400 px-1">No patient summaries available.</p>
-        ) : (
-          <div className="space-y-4">
-            {summaries.map((summary) => {
-              const isExpanded = expandedSummary === summary.id;
-              return (
-                <motion.div
-                  key={summary.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="rounded-xl bg-white shadow-sm border border-gray-100 overflow-hidden"
-                >
-                  {/* Header (like Instagram post header) */}
-                  <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-50">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#45BFD3]/10 text-xs font-semibold text-[#45BFD3]">
-                      {initials(summary.patient_name)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-900 text-sm truncate">
-                        {summary.patient_name}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {new Date(summary.date).toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </p>
-                    </div>
+                {/* Header: avatar + name + time */}
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-tr from-[#45BFD3] to-[#8BC34A] text-white text-sm font-semibold shrink-0">
+                    {initials(update.patient_name)}
                   </div>
-
-                  {/* Body */}
-                  <div className="px-4 py-3">
-                    <p className="text-sm text-gray-700 leading-relaxed">
-                      {summary.diagnosis_snippet}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-900 text-sm truncate">
+                      {update.patient_name}
                     </p>
-
-                    <AnimatePresence>
-                      {isExpanded && (
-                        <motion.div
-                          key="expanded"
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.25 }}
-                          className="overflow-hidden"
-                        >
-                          <p className="mt-3 text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">
-                            {summary.content}
-                          </p>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    <button
-                      onClick={() =>
-                        setExpandedSummary(isExpanded ? null : summary.id)
-                      }
-                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#45BFD3] hover:text-[#3baab8] transition-colors"
-                    >
-                      {isExpanded ? "Show less" : "Read more"}
-                      <ChevronRight
-                        className={cn(
-                          "h-3.5 w-3.5 transition-transform",
-                          isExpanded && "rotate-90"
-                        )}
-                      />
-                    </button>
+                    <div className="flex items-center gap-1 text-xs text-gray-400">
+                      <Clock className="w-3 h-3" />
+                      {timeAgo(update.created_at)}
+                    </div>
                   </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        )}
-      </Section>
+                </div>
 
-      {/* ── Story Modal ── */}
-      <AnimatePresence>
-        {selectedStory && (
-          <StoryModal
-            patient={selectedStory}
-            onClose={() => setSelectedStory(null)}
-          />
-        )}
-      </AnimatePresence>
+                {/* Update text */}
+                <p className="text-sm text-gray-700 leading-relaxed line-clamp-3 mb-3">
+                  {update.update_text}
+                </p>
+
+                {/* Summary bullets (max 2) */}
+                {update.summary &&
+                  (() => {
+                    const bullets = update.summary!
+                      .split("\n")
+                      .filter((l) => l.trim().startsWith("-"))
+                      .map((l) => l.trim().slice(1).trim())
+                      .slice(0, 2);
+                    return bullets.length > 0 ? (
+                      <div className="rounded-lg bg-[#45BFD3]/5 border border-[#45BFD3]/15 p-3 mb-3">
+                        {bullets.map((b, i) => (
+                          <p
+                            key={i}
+                            className="text-xs text-gray-600 flex gap-1.5"
+                          >
+                            <span className="text-[#45BFD3] shrink-0">•</span>
+                            <span className="line-clamp-1">{b}</span>
+                          </p>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
+
+                {/* Audio waveform bar */}
+                {update.audio_url && (
+                  <div
+                    className="bg-gray-100 w-full h-12 rounded-lg flex items-center gap-2 px-3"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        isPlaying
+                          ? handlePause(update.id)
+                          : handlePlay(update.id, update.audio_url!);
+                      }}
+                      className="shrink-0"
+                    >
+                      {isPlaying ? (
+                        <Pause className="w-8 h-8 text-gray-700" />
+                      ) : (
+                        <Play className="w-8 h-8 text-gray-700" />
+                      )}
+                    </button>
+                    <div className="flex items-center gap-[2px] flex-1 h-8">
+                      {waveVariants.map((variant, i) => (
+                        <motion.div
+                          key={i}
+                          className="bg-gray-500 rounded-full"
+                          style={{
+                            width: 3,
+                            height: `${barHeights[i]}px`,
+                            margin: "0 1px",
+                          }}
+                          variants={variant}
+                          initial="initial"
+                          animate={isPlaying ? "animate" : "initial"}
+                        />
+                      ))}
+                    </div>
+                    {update.audio_duration != null && (
+                      <span className="text-[10px] text-gray-400 shrink-0 flex items-center gap-1">
+                        <Mic className="w-3 h-3" />
+                        {formatDuration(update.audio_duration)}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -2522,6 +2522,80 @@ async def serve_audio(filename: str):
 
 
 # =============================================================================
+# Doctor Feed & Replies
+# =============================================================================
+
+@app.get("/api/doctor/{doctor_id}/feed/patient-updates")
+async def get_doctor_feed_patient_updates(doctor_id: int, days: int = 7):
+    """Get patient health updates for a doctor's patients (last N days)."""
+    try:
+        updates = db.get_patient_updates_for_doctor(doctor_id, days=days)
+        return JSONResponse(content={"updates": updates})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient-updates/{update_id}/detail")
+async def get_patient_update_detail(update_id: int):
+    """Get a single patient update with its doctor replies."""
+    try:
+        update = db.get_patient_update_by_id(update_id)
+        if not update:
+            raise HTTPException(status_code=404, detail="Update not found")
+        replies = db.get_replies_for_update(update_id)
+        return JSONResponse(content={"update": update, "replies": replies})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DoctorReplyRequest(BaseModel):
+    patient_id: int
+    update_id: int
+    reply_text: str
+    audio_url: Optional[str] = None
+    audio_duration: Optional[int] = None
+
+
+@app.post("/api/doctor/{doctor_id}/reply")
+async def post_doctor_reply(doctor_id: int, request: DoctorReplyRequest):
+    """Doctor replies to a patient health update."""
+    try:
+        reply_id = db.add_doctor_reply(
+            doctor_id=doctor_id,
+            patient_id=request.patient_id,
+            update_id=request.update_id,
+            reply_text=request.reply_text,
+            audio_url=request.audio_url,
+            audio_duration=request.audio_duration,
+        )
+        return JSONResponse(content={"id": reply_id, "success": True, "created_at": datetime.now().isoformat()})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/doctor/{doctor_id}/patient/{patient_id}/communications")
+async def get_doctor_patient_comms(doctor_id: int, patient_id: int):
+    """Get all doctor replies to a specific patient (for history view)."""
+    try:
+        comms = db.get_doctor_patient_communications(doctor_id, patient_id)
+        return JSONResponse(content={"communications": comms})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient/{patient_id}/doctor-replies")
+async def get_patient_doctor_replies(patient_id: int):
+    """Get all doctor replies for a patient (patient-side view)."""
+    try:
+        replies = db.get_doctor_replies_for_patient(patient_id)
+        return JSONResponse(content={"replies": replies})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Patient Appointment Booking
 # =============================================================================
 

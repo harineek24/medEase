@@ -10,11 +10,12 @@ import HealthHistory from './components/patient/HealthHistory'
 import PatientUpdates from './components/patient/PatientUpdates'
 import AppointmentBooking from './components/patient/AppointmentBooking'
 import HealthAppointmentCards from './components/patient/HealthAppointmentCards'
+import DoctorUpdatesCard from './components/patient/DoctorUpdatesCard'
 import VoiceConsult from './components/VoiceConsult'
 import { HelixScene } from './components/ui/helix-scene'
 import { Ripple } from './components/ui/material-design-3-ripple'
 import BlurEffect from 'react-progressive-blur'
-import { Upload, Shield, Zap, MessageSquare, Stethoscope } from 'lucide-react'
+import { Upload, Shield, Zap, MessageSquare } from 'lucide-react'
 import AppRouter from '@/AppRouter'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 
@@ -722,19 +723,8 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
 
           {/* Right column — 1/3 */}
           <div className="space-y-6">
-            {/* Doctor Updates placeholder */}
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-8 h-8 rounded-full bg-[#45BFD3]/10 flex items-center justify-center">
-                  <Stethoscope className="w-4 h-4 text-[#45BFD3]" />
-                </div>
-                <h3 className="text-base font-semibold text-gray-900">Doctor Updates</h3>
-              </div>
-              <div className="text-center py-6">
-                <Stethoscope className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                <p className="text-sm text-gray-400">Updates from your doctor will appear here</p>
-              </div>
-            </div>
+            {/* Doctor Updates — real replies */}
+            <DoctorUpdatesCard patientId={patientId ?? 1} />
 
             {/* Health Dashboard (vitals, charts, labs) */}
             {renderHealthDashboard()}
