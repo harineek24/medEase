@@ -585,8 +585,9 @@ const BookingModal: React.FC<{
         `${API_BASE_URL}/api/doctors/${doctor.id}/available-slots?date=${selectedDate}`,
       );
       if (!res.ok) throw new Error('Failed to load available slots');
-      const data: TimeSlot[] = await res.json();
-      setSlots(data);
+      const data = await res.json();
+      const rawSlots: string[] = data.slots || data;
+      setSlots(rawSlots.map((s: string) => ({ time: s, available: true })));
     } catch {
       setSlots([]);
       setError('Could not load time slots. Please try again.');
@@ -892,8 +893,8 @@ const AppointmentBooking: React.FC<AppointmentBookingProps> = ({ patientId }) =>
       try {
         const res = await fetch(`${API_BASE_URL}/api/doctors/specialties`);
         if (res.ok) {
-          const data: string[] = await res.json();
-          setSpecialties(data);
+          const data = await res.json();
+          setSpecialties(data.specialties || data);
         }
       } catch {
         // Specialties are non-critical; silently handle
@@ -983,8 +984,8 @@ const AppointmentBooking: React.FC<AppointmentBookingProps> = ({ patientId }) =>
     try {
       const res = await fetch(`${API_BASE_URL}/api/doctors/search?${params.toString()}`);
       if (!res.ok) throw new Error(`Search failed (${res.status})`);
-      const data: Doctor[] = await res.json();
-      setDoctors(data);
+      const data = await res.json();
+      setDoctors(data.doctors || data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to search doctors');
       setDoctors([]);

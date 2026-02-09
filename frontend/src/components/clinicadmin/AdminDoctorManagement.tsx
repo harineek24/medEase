@@ -188,8 +188,8 @@ export default function AdminDoctorManagement() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/doctors`);
       if (!res.ok) throw new Error(`Failed to fetch doctors (${res.status})`);
-      const data: Doctor[] = await res.json();
-      setDoctors(data);
+      const data = await res.json();
+      setDoctors(data.doctors || data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -202,8 +202,8 @@ export default function AdminDoctorManagement() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/clinics`);
       if (!res.ok) return;
-      const data: Clinic[] = await res.json();
-      setClinics(data);
+      const data = await res.json();
+      setClinics(data.clinics || data);
     } catch {
       /* silent */
     }
@@ -222,8 +222,8 @@ export default function AdminDoctorManagement() {
         `${API_BASE_URL}/api/doctor/${doctorId}/calendar`,
       );
       if (!res.ok) throw new Error("Failed to load calendar");
-      const data: CalendarAppointment[] = await res.json();
-      setCalendarAppointments(data);
+      const data = await res.json();
+      setCalendarAppointments(data.appointments || data);
     } catch {
       setCalendarAppointments([]);
     } finally {
