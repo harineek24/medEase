@@ -454,6 +454,9 @@ def init_database():
         # Seed sample data if tables are empty
         _seed_sample_data(cursor)
 
+        # Ensure doctor availability/extras are always populated
+        _ensure_doctor_extras(cursor)
+
 
 def _migrate_doctors_table(cursor):
     """Add new columns to doctors table if they don't exist."""
@@ -471,6 +474,39 @@ def _migrate_doctors_table(cursor):
             cursor.execute(f"ALTER TABLE doctors ADD COLUMN {col_name} {col_type}")
         except Exception:
             pass  # Column already exists
+
+
+def _ensure_doctor_extras(cursor):
+    """Ensure seeded doctors have availability hours and extended fields populated.
+
+    This runs on every init to fix the case where the DB was initially seeded
+    before the migration added the available_hours column.
+    """
+    doctor_extras = [
+        # id, fee, rating, review_count, lat, lng, available_hours, accepted_insurance
+        (1, 175, 4.8, 127, 37.3541, -121.9552, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare'),
+        (2, 150, 4.6, 89, 37.3541, -121.9552, '{"Mon":"8:00-16:00","Tue":"8:00-16:00","Wed":"8:00-16:00","Thu":"8:00-16:00","Fri":"8:00-14:00"}', 'Aetna,Blue Cross,Kaiser,Medicaid'),
+        (3, 200, 4.9, 203, 37.3382, -121.8863, '{"Mon":"8:00-17:00","Tue":"8:00-17:00","Wed":"8:00-17:00","Thu":"8:00-17:00"}', 'Blue Cross,Cigna,United Healthcare,Humana'),
+        (4, 185, 4.7, 156, 37.3382, -121.8863, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Kaiser,United Healthcare'),
+        (5, 160, 4.5, 64, 37.5485, -121.9886, '{"Mon":"8:00-20:00","Tue":"8:00-20:00","Wed":"8:00-20:00","Thu":"8:00-20:00","Fri":"8:00-20:00","Sat":"10:00-18:00","Sun":"10:00-18:00"}', 'Aetna,Blue Cross,Cigna,Kaiser,Medicaid,United Healthcare'),
+        (6, 130, 4.4, 45, 37.5485, -121.9886, '{"Mon":"10:00-20:00","Tue":"10:00-20:00","Wed":"10:00-20:00","Thu":"10:00-20:00","Fri":"10:00-20:00","Sat":"12:00-18:00"}', 'Blue Cross,Cigna,Medicaid,United Healthcare'),
+        (7, 225, 4.9, 178, 37.4848, -122.2281, '{"Mon":"8:00-16:00","Tue":"8:00-16:00","Wed":"8:00-16:00","Thu":"8:00-16:00","Fri":"8:00-12:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare'),
+        (8, 190, 4.6, 92, 37.4848, -122.2281, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-17:00"}', 'Aetna,Blue Cross,Kaiser,Humana'),
+        (9, 210, 4.8, 165, 37.7749, -122.4194, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare,Humana'),
+        (10, 195, 4.7, 134, 37.7749, -122.4194, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-17:00"}', 'Blue Cross,Cigna,Kaiser,Medicaid,United Healthcare'),
+    ]
+
+    for doc_id, fee, rating, reviews, lat, lng, hours, insurance in doctor_extras:
+        # Only update if available_hours is empty/default
+        cursor.execute("SELECT available_hours FROM doctors WHERE id = ?", (doc_id,))
+        row = cursor.fetchone()
+        if row and (not row['available_hours'] or row['available_hours'] == '{}'):
+            cursor.execute("""
+                UPDATE doctors SET consultation_fee = ?, rating = ?, review_count = ?,
+                                  location_lat = ?, location_lng = ?, available_hours = ?,
+                                  accepted_insurance = ?
+                WHERE id = ?
+            """, (fee, rating, reviews, lat, lng, hours, insurance, doc_id))
 
 
 def _seed_sample_data(cursor):

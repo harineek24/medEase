@@ -9,7 +9,7 @@ import GeneralChat from './components/GeneralChat'
 import HealthHistory from './components/patient/HealthHistory'
 import PatientUpdates from './components/patient/PatientUpdates'
 import AppointmentBooking from './components/patient/AppointmentBooking'
-import PatientAppointments from './components/patient/PatientAppointments'
+import HealthAppointmentCards from './components/patient/HealthAppointmentCards'
 import VoiceConsult from './components/VoiceConsult'
 import { HelixScene } from './components/ui/helix-scene'
 import { Ripple } from './components/ui/material-design-3-ripple'
@@ -21,7 +21,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 type AppState = 'upload' | 'processing' | 'results'
 
 // Extended view type that includes the new patient-portal views
-export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health' | 'appointments' | 'myappointments'
+export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health' | 'appointments'
 
 interface SummaryData {
   summary: string
@@ -513,21 +513,24 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
   const renderHealthView = () => {
     if (testResults.length === 0) {
       return (
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="text-center max-w-md">
-            <div className="w-16 h-16 rounded-full bg-[#8BC34A]/10 flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-[#8BC34A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-              </svg>
+        <div className="max-w-5xl mx-auto px-4 py-8">
+          <HealthAppointmentCards patientId={patientId ?? 1} onNavigate={onNavigate} />
+          <div className="flex items-center justify-center min-h-[40vh]">
+            <div className="text-center max-w-md">
+              <div className="w-16 h-16 rounded-full bg-[#8BC34A]/10 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-[#8BC34A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-light text-gray-900 mb-2">Health Dashboard</h2>
+              <p className="text-gray-500 text-sm">Upload a medical document first to see your health metrics extracted and displayed here.</p>
+              <button
+                onClick={() => onNavigate('upload')}
+                className="mt-4 px-5 py-2.5 rounded-lg bg-[#45BFD3] text-white text-sm font-medium hover:bg-[#3dafc2] transition-colors"
+              >
+                Upload Document
+              </button>
             </div>
-            <h2 className="text-2xl font-light text-gray-900 mb-2">Health Dashboard</h2>
-            <p className="text-gray-500 text-sm">Upload a medical document first to see your health metrics extracted and displayed here.</p>
-            <button
-              onClick={() => onNavigate('upload')}
-              className="mt-4 px-5 py-2.5 rounded-lg bg-[#45BFD3] text-white text-sm font-medium hover:bg-[#3dafc2] transition-colors"
-            >
-              Upload Document
-            </button>
           </div>
         </div>
       )
@@ -606,6 +609,9 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
             <p className="text-sm text-gray-400">Extracted from your latest document</p>
           </div>
         </div>
+
+        {/* Appointment cards */}
+        <HealthAppointmentCards patientId={patientId ?? 1} onNavigate={onNavigate} />
 
         {/* Vital cards row - clickable */}
         {vitalResults.length > 0 && (
@@ -810,9 +816,6 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
 
       case 'appointments':
         return <AppointmentBooking patientId={patientId ?? 1} />
-
-      case 'myappointments':
-        return <PatientAppointments patientId={patientId ?? 1} />
 
       case 'upload':
       default:

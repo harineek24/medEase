@@ -8,13 +8,12 @@ import {
   Heart,
   LogOut,
   CalendarPlus,
-  CalendarDays,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { PatientApp } from '@/App'
 
-type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health' | 'appointments' | 'myappointments'
+type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health' | 'appointments'
 
 export default function PatientLayout() {
   const [currentView, setCurrentView] = useState<PatientView>('upload')
@@ -28,7 +27,6 @@ export default function PatientLayout() {
     { view: 'updates',      icon: Bell,             label: 'Updates' },
     { view: 'health',       icon: Heart,            label: 'Health' },
     { view: 'appointments', icon: CalendarPlus,     label: 'Book Appt' },
-    { view: 'myappointments', icon: CalendarDays,   label: 'My Appts' },
   ]
 
   return (
