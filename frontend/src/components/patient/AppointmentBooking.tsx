@@ -24,17 +24,23 @@ import { API_BASE_URL } from '@/api';
 
 interface Doctor {
   id: number;
-  name: string;
+  first_name: string;
+  last_name: string;
   title: string;
   specialty: string;
   sub_specialty?: string;
   rating: number;
   review_count: number;
   clinic_name: string;
-  city: string;
+  clinic_city?: string;
+  clinic_address?: string;
   consultation_fee: number;
   nearest_available?: string;
-  insurance_accepted: string[];
+  accepted_insurance?: string;
+  bio?: string;
+  languages?: string;
+  education?: string;
+  available_hours?: string;
 }
 
 interface TimeSlot {
@@ -150,6 +156,10 @@ function getAvatarColor(name: string): string {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
   return colors[Math.abs(hash) % colors.length];
+}
+
+function doctorFullName(d: Doctor): string {
+  return `Dr. ${d.first_name} ${d.last_name}`;
 }
 
 function buildWeek(startDate: Date): Date[] {
@@ -497,14 +507,14 @@ const DoctorCard: React.FC<{
       <div
         className={cn(
           'flex-shrink-0 h-14 w-14 rounded-full flex items-center justify-center text-white text-lg font-bold',
-          getAvatarColor(doctor.name),
+          getAvatarColor(doctorFullName(doctor)),
         )}
       >
-        {getInitials(doctor.name)}
+        {getInitials(doctorFullName(doctor))}
       </div>
       <div className="min-w-0 flex-1">
         <h3 className="text-base font-bold text-gray-900 truncate">
-          {doctor.name}{doctor.title ? `, ${doctor.title}` : ''}
+          {doctorFullName(doctor)}{doctor.title ? `, ${doctor.title}` : ''}
         </h3>
         <div className="flex items-center gap-1.5 mt-0.5">
           <Stethoscope className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
@@ -523,7 +533,7 @@ const DoctorCard: React.FC<{
     <div className="space-y-2 mb-4 flex-1">
       <div className="flex items-center gap-2 text-sm text-gray-500">
         <MapPin className="h-4 w-4 text-gray-400 flex-shrink-0" />
-        <span className="truncate">{doctor.clinic_name}, {doctor.city}</span>
+        <span className="truncate">{doctor.clinic_name}{doctor.clinic_city ? `, ${doctor.clinic_city}` : ''}</span>
       </div>
       <div className="flex items-center gap-2 text-sm text-gray-500">
         <DollarSign className="h-4 w-4 text-gray-400 flex-shrink-0" />
@@ -674,7 +684,7 @@ const BookingModal: React.FC<{
               <div className="flex items-center gap-3">
                 <Stethoscope className="h-4 w-4 text-[#45BFD3]" />
                 <span className="text-sm font-medium text-gray-800">
-                  {doctor.name}{doctor.title ? `, ${doctor.title}` : ''}
+                  {doctorFullName(doctor)}{doctor.title ? `, ${doctor.title}` : ''}
                 </span>
               </div>
               <div className="flex items-center gap-3">
@@ -687,7 +697,7 @@ const BookingModal: React.FC<{
               </div>
               <div className="flex items-center gap-3">
                 <MapPin className="h-4 w-4 text-[#45BFD3]" />
-                <span className="text-sm text-gray-600">{doctor.clinic_name}, {doctor.city}</span>
+                <span className="text-sm text-gray-600">{doctor.clinic_name}{doctor.clinic_city ? `, ${doctor.clinic_city}` : ''}</span>
               </div>
               {reason.trim() && (
                 <div className="flex items-start gap-3">
@@ -724,17 +734,17 @@ const BookingModal: React.FC<{
                 <div
                   className={cn(
                     'h-12 w-12 rounded-full flex items-center justify-center text-white font-bold',
-                    getAvatarColor(doctor.name),
+                    getAvatarColor(doctorFullName(doctor)),
                   )}
                 >
-                  {getInitials(doctor.name)}
+                  {getInitials(doctorFullName(doctor))}
                 </div>
                 <div>
                   <p className="text-sm font-bold text-gray-900">
-                    {doctor.name}{doctor.title ? `, ${doctor.title}` : ''}
+                    {doctorFullName(doctor)}{doctor.title ? `, ${doctor.title}` : ''}
                   </p>
                   <p className="text-xs text-gray-500">{doctor.specialty}</p>
-                  <p className="text-xs text-gray-400">{doctor.clinic_name}, {doctor.city}</p>
+                  <p className="text-xs text-gray-400">{doctor.clinic_name}{doctor.clinic_city ? `, ${doctor.clinic_city}` : ''}</p>
                 </div>
                 <div className="ml-auto text-right">
                   <p className="text-lg font-bold text-gray-900">${doctor.consultation_fee}</p>
@@ -943,15 +953,15 @@ const AppointmentBooking: React.FC<AppointmentBookingProps> = ({ patientId }) =>
       doctors
         .filter(
           (d) =>
-            d.name.toLowerCase().includes(q) ||
-            d.specialty.toLowerCase().includes(q),
+            `${d.first_name} ${d.last_name}`.toLowerCase().includes(q) ||
+            (d.specialty || '').toLowerCase().includes(q),
         )
         .slice(0, 5)
         .forEach((d) => {
           results.push({
             type: 'doctor',
             id: d.id,
-            label: d.name,
+            label: doctorFullName(d),
             subtitle: d.specialty,
           });
         });
