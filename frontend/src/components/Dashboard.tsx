@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Users, FileText, Pill, AlertTriangle, ClipboardList, Inbox } from 'lucide-react'
 import { API_BASE_URL } from '../api'
 
 interface DashboardStats {
@@ -58,7 +59,7 @@ function Dashboard({ onViewHistory }: DashboardProps) {
   if (error) {
     return (
       <div className="dashboard-error">
-        <span className="error-icon">⚠️</span>
+        <span className="error-icon"><AlertTriangle className="w-6 h-6" /></span>
         <p>{error}</p>
         <button onClick={fetchStats} className="retry-btn">Retry</button>
       </div>
@@ -77,14 +78,14 @@ function Dashboard({ onViewHistory }: DashboardProps) {
   return (
     <div className="dashboard">
       <div className="dashboard-header">
-        <h2>📊 Analytics Dashboard</h2>
+        <h2>Analytics Dashboard</h2>
         <p className="dashboard-subtitle">Overview of your healthcare data</p>
       </div>
 
       {/* Stats Cards */}
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-icon">👥</div>
+          <div className="stat-icon"><Users className="w-5 h-5" /></div>
           <div className="stat-info">
             <span className="stat-value">{stats?.total_patients || 0}</span>
             <span className="stat-label">Patients</span>
@@ -92,7 +93,7 @@ function Dashboard({ onViewHistory }: DashboardProps) {
         </div>
 
         <div className="stat-card">
-          <div className="stat-icon">📄</div>
+          <div className="stat-icon"><FileText className="w-5 h-5" /></div>
           <div className="stat-info">
             <span className="stat-value">{stats?.total_summaries || 0}</span>
             <span className="stat-label">Summaries</span>
@@ -100,7 +101,7 @@ function Dashboard({ onViewHistory }: DashboardProps) {
         </div>
 
         <div className="stat-card">
-          <div className="stat-icon">💊</div>
+          <div className="stat-icon"><Pill className="w-5 h-5" /></div>
           <div className="stat-info">
             <span className="stat-value">{stats?.total_medications || 0}</span>
             <span className="stat-label">Medications</span>
@@ -108,7 +109,7 @@ function Dashboard({ onViewHistory }: DashboardProps) {
         </div>
 
         <div className="stat-card highlight">
-          <div className="stat-icon">⚠️</div>
+          <div className="stat-icon"><AlertTriangle className="w-5 h-5" /></div>
           <div className="stat-info">
             <span className="stat-value">{stats?.high_risk_cases || 0}</span>
             <span className="stat-label">High Risk Cases</span>
@@ -145,7 +146,7 @@ function Dashboard({ onViewHistory }: DashboardProps) {
           ) : (
             <div className="no-data">
               <p>No interaction data yet</p>
-              <p className="no-data-hint">Upload EHR documents to see analytics</p>
+              <p className="no-data-hint">Upload EHR documents to see analytics here</p>
             </div>
           )}
         </div>
@@ -176,7 +177,7 @@ function Dashboard({ onViewHistory }: DashboardProps) {
       {/* Recent Activity */}
       <div className="recent-activity-section">
         <div className="section-header">
-          <h3>📋 Recent Activity</h3>
+          <h3>Recent Activity</h3>
           <button className="view-all-btn" onClick={onViewHistory}>View All</button>
         </div>
 
@@ -184,7 +185,7 @@ function Dashboard({ onViewHistory }: DashboardProps) {
           <div className="activity-list">
             {stats.recent_activity.slice(0, 5).map((activity, index) => (
               <div key={index} className="activity-item">
-                <div className="activity-icon">📄</div>
+                <div className="activity-icon"><ClipboardList className="w-4 h-4" /></div>
                 <div className="activity-info">
                   <span className="activity-patient">{activity.patient_name || 'Unknown Patient'}</span>
                   <span className="activity-diagnosis">{activity.diagnosis || 'No diagnosis'}</span>
@@ -197,9 +198,9 @@ function Dashboard({ onViewHistory }: DashboardProps) {
           </div>
         ) : (
           <div className="no-activity">
-            <div className="no-activity-icon">📭</div>
+            <div className="no-activity-icon"><Inbox className="w-8 h-8 text-gray-300" /></div>
             <p>No recent activity</p>
-            <p className="no-activity-hint">Upload your first EHR document to get started!</p>
+            <p className="no-activity-hint">Upload your first EHR document to get started</p>
           </div>
         )}
       </div>

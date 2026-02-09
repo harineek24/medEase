@@ -1,11 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import {
-  LayoutDashboard,
-  CalendarDays,
-  Receipt,
   ShieldCheck,
-  FileText,
-  Settings,
   LogOut,
   Users,
   Stethoscope,
@@ -14,14 +9,8 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 
 const navItems = [
-  { to: '/clinicadmin',              icon: LayoutDashboard, label: 'Dashboard',      end: true },
   { to: '/clinicadmin/patients',     icon: Users,           label: 'Patients',       end: false },
   { to: '/clinicadmin/doctors',      icon: Stethoscope,     label: 'Doctors',        end: false },
-  { to: '/clinicadmin/appointments', icon: CalendarDays,    label: 'Appointments',   end: false },
-  { to: '/clinicadmin/billing',      icon: Receipt,         label: 'Billing',        end: false },
-  { to: '/clinicadmin/insurance',    icon: ShieldCheck,     label: 'Insurance',      end: false },
-  { to: '/clinicadmin/notes',        icon: FileText,        label: 'Patient Notes',  end: false },
-  { to: '/clinicadmin/settings',     icon: Settings,        label: 'Settings',       end: false },
 ]
 
 export default function ClinicAdminLayout() {

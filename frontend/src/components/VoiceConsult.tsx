@@ -430,13 +430,12 @@ function VoiceConsult() {
       field_name: pendingField.field_name
     }))
 
-    // Add to fields list
-    setFields(prev => [...prev, {
-      field_name: pendingField.field_name,
-      label: pendingField.label,
-      value: pendingField.value,
-      confirmed: true
-    }])
+    // Update existing field to confirmed
+    setFields(prev => prev.map(f =>
+      f.field_name === pendingField.field_name
+        ? { ...f, confirmed: true }
+        : f
+    ))
 
     setPendingField(null)
     setIsEditing(false)
@@ -453,13 +452,12 @@ function VoiceConsult() {
       value: editValue
     }))
 
-    // Add to fields list with edited value
-    setFields(prev => [...prev, {
-      field_name: pendingField.field_name,
-      label: pendingField.label,
-      value: editValue,
-      confirmed: true
-    }])
+    // Update existing field with edited value and confirm
+    setFields(prev => prev.map(f =>
+      f.field_name === pendingField.field_name
+        ? { ...f, value: editValue, confirmed: true }
+        : f
+    ))
 
     setPendingField(null)
     setIsEditing(false)
@@ -555,7 +553,7 @@ function VoiceConsult() {
               </div>
             ) : (
               <div className="notes-fields">
-                {fields.map((field, index) => (
+                {fields.filter(f => f.confirmed).map((field, index) => (
                   <div
                     key={field.field_name}
                     className={`note-field ${field.confirmed ? 'confirmed' : ''}`}
