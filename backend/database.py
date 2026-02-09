@@ -446,6 +446,23 @@ def init_database():
             )
         """)
 
+        # Doctor replies to patient updates
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS doctor_replies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doctor_id INTEGER NOT NULL,
+                patient_id INTEGER NOT NULL,
+                update_id INTEGER NOT NULL,
+                reply_text TEXT,
+                audio_url TEXT,
+                audio_duration INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (doctor_id) REFERENCES doctors(id),
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (update_id) REFERENCES patient_updates(id)
+            )
+        """)
+
         print("Database initialized successfully!")
 
         # Migrate: add new doctor columns if missing
@@ -453,6 +470,9 @@ def init_database():
 
         # Seed sample data if tables are empty
         _seed_sample_data(cursor)
+
+        # Ensure doctor availability/extras are always populated
+        _ensure_doctor_extras(cursor)
 
 
 def _migrate_doctors_table(cursor):
@@ -471,6 +491,39 @@ def _migrate_doctors_table(cursor):
             cursor.execute(f"ALTER TABLE doctors ADD COLUMN {col_name} {col_type}")
         except Exception:
             pass  # Column already exists
+
+
+def _ensure_doctor_extras(cursor):
+    """Ensure seeded doctors have availability hours and extended fields populated.
+
+    This runs on every init to fix the case where the DB was initially seeded
+    before the migration added the available_hours column.
+    """
+    doctor_extras = [
+        # id, fee, rating, review_count, lat, lng, available_hours, accepted_insurance
+        (1, 175, 4.8, 127, 37.3541, -121.9552, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare'),
+        (2, 150, 4.6, 89, 37.3541, -121.9552, '{"Mon":"8:00-16:00","Tue":"8:00-16:00","Wed":"8:00-16:00","Thu":"8:00-16:00","Fri":"8:00-14:00"}', 'Aetna,Blue Cross,Kaiser,Medicaid'),
+        (3, 200, 4.9, 203, 37.3382, -121.8863, '{"Mon":"8:00-17:00","Tue":"8:00-17:00","Wed":"8:00-17:00","Thu":"8:00-17:00"}', 'Blue Cross,Cigna,United Healthcare,Humana'),
+        (4, 185, 4.7, 156, 37.3382, -121.8863, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Kaiser,United Healthcare'),
+        (5, 160, 4.5, 64, 37.5485, -121.9886, '{"Mon":"8:00-20:00","Tue":"8:00-20:00","Wed":"8:00-20:00","Thu":"8:00-20:00","Fri":"8:00-20:00","Sat":"10:00-18:00","Sun":"10:00-18:00"}', 'Aetna,Blue Cross,Cigna,Kaiser,Medicaid,United Healthcare'),
+        (6, 130, 4.4, 45, 37.5485, -121.9886, '{"Mon":"10:00-20:00","Tue":"10:00-20:00","Wed":"10:00-20:00","Thu":"10:00-20:00","Fri":"10:00-20:00","Sat":"12:00-18:00"}', 'Blue Cross,Cigna,Medicaid,United Healthcare'),
+        (7, 225, 4.9, 178, 37.4848, -122.2281, '{"Mon":"8:00-16:00","Tue":"8:00-16:00","Wed":"8:00-16:00","Thu":"8:00-16:00","Fri":"8:00-12:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare'),
+        (8, 190, 4.6, 92, 37.4848, -122.2281, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-17:00"}', 'Aetna,Blue Cross,Kaiser,Humana'),
+        (9, 210, 4.8, 165, 37.7749, -122.4194, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-15:00"}', 'Aetna,Blue Cross,Cigna,United Healthcare,Humana'),
+        (10, 195, 4.7, 134, 37.7749, -122.4194, '{"Mon":"9:00-17:00","Tue":"9:00-17:00","Wed":"9:00-17:00","Thu":"9:00-17:00","Fri":"9:00-17:00"}', 'Blue Cross,Cigna,Kaiser,Medicaid,United Healthcare'),
+    ]
+
+    for doc_id, fee, rating, reviews, lat, lng, hours, insurance in doctor_extras:
+        # Only update if available_hours is empty/default
+        cursor.execute("SELECT available_hours FROM doctors WHERE id = ?", (doc_id,))
+        row = cursor.fetchone()
+        if row and (not row['available_hours'] or row['available_hours'] == '{}'):
+            cursor.execute("""
+                UPDATE doctors SET consultation_fee = ?, rating = ?, review_count = ?,
+                                  location_lat = ?, location_lng = ?, available_hours = ?,
+                                  accepted_insurance = ?
+                WHERE id = ?
+            """, (fee, rating, reviews, lat, lng, hours, insurance, doc_id))
 
 
 def _seed_sample_data(cursor):
@@ -1760,6 +1813,43 @@ def get_all_consultations(limit: int = 50) -> List[Dict]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_consultations_for_doctor_today(doctor_id: int) -> list:
+    """Get today's completed consultations for a doctor's patients, with fields."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT cs.*, p.name as patient_name
+            FROM consultation_sessions cs
+            JOIN patients p ON p.id = cs.patient_id
+            WHERE cs.patient_id IN (
+                SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = ?
+            )
+            AND cs.status = 'completed'
+            AND date(cs.completed_at) = date('now')
+            ORDER BY cs.completed_at DESC
+        """, (doctor_id,))
+        sessions = [dict(row) for row in cursor.fetchall()]
+        for session in sessions:
+            session['fields'] = get_consultation_fields(session['session_id'])
+        return sessions
+
+
+def get_patient_consultations(patient_id: int, limit: int = 50) -> list:
+    """Get all completed consultations for a patient, with fields."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM consultation_sessions
+            WHERE patient_id = ? AND status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT ?
+        """, (patient_id, limit))
+        sessions = [dict(row) for row in cursor.fetchall()]
+        for session in sessions:
+            session['fields'] = get_consultation_fields(session['session_id'])
+        return sessions
+
+
 # =============================================================================
 # Clinic Operations
 # =============================================================================
@@ -2737,6 +2827,95 @@ def get_patient_updates(patient_id: int, limit: int = 50) -> list:
             SELECT * FROM patient_updates WHERE patient_id = ?
             ORDER BY created_at DESC LIMIT ?
         """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_patient_update_by_id(update_id: int) -> dict:
+    """Get a single patient update by ID, with patient name."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pu.*, p.name as patient_name
+            FROM patient_updates pu
+            JOIN patients p ON p.id = pu.patient_id
+            WHERE pu.id = ?
+        """, (update_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_patient_updates_for_doctor(doctor_id: int, days: int = 7, limit: int = 50) -> list:
+    """Get patient updates for all patients of a doctor, within last N days."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pu.*, p.name as patient_name
+            FROM patient_updates pu
+            JOIN patients p ON p.id = pu.patient_id
+            WHERE pu.patient_id IN (
+                SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = ?
+            )
+            AND pu.created_at >= datetime('now', ?)
+            ORDER BY pu.created_at DESC
+            LIMIT ?
+        """, (doctor_id, f'-{days} days', limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def add_doctor_reply(doctor_id: int, patient_id: int, update_id: int,
+                     reply_text: str = None, audio_url: str = None,
+                     audio_duration: int = None) -> int:
+    """Add a doctor reply to a patient update."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO doctor_replies (doctor_id, patient_id, update_id, reply_text, audio_url, audio_duration)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (doctor_id, patient_id, update_id, reply_text, audio_url, audio_duration))
+        return cursor.lastrowid
+
+
+def get_replies_for_update(update_id: int) -> list:
+    """Get all doctor replies for a specific patient update."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT dr.*, d.first_name || ' ' || d.last_name as doctor_name
+            FROM doctor_replies dr
+            JOIN doctors d ON d.id = dr.doctor_id
+            WHERE dr.update_id = ?
+            ORDER BY dr.created_at ASC
+        """, (update_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_doctor_patient_communications(doctor_id: int, patient_id: int) -> list:
+    """Get all doctor replies to a specific patient, with original update context."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT dr.*, pu.update_text as original_update, pu.created_at as update_date
+            FROM doctor_replies dr
+            JOIN patient_updates pu ON pu.id = dr.update_id
+            WHERE dr.doctor_id = ? AND dr.patient_id = ?
+            ORDER BY dr.created_at DESC
+        """, (doctor_id, patient_id))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_doctor_replies_for_patient(patient_id: int) -> list:
+    """Get all doctor replies for a patient (for patient-side view)."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT dr.*, d.first_name || ' ' || d.last_name as doctor_name,
+                   pu.update_text as original_update
+            FROM doctor_replies dr
+            JOIN doctors d ON d.id = dr.doctor_id
+            JOIN patient_updates pu ON pu.id = dr.update_id
+            WHERE dr.patient_id = ?
+            ORDER BY dr.created_at DESC
+        """, (patient_id,))
         return [dict(row) for row in cursor.fetchall()]
 
 

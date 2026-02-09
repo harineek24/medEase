@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { API_BASE_URL } from '../../api'
+import { useAuth } from '../../contexts/AuthContext'
 import {
   ChevronLeft,
   ChevronRight,
@@ -17,6 +18,9 @@ import {
   Minus,
   TrendingUp,
   Clock,
+  Mic,
+  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -258,6 +262,8 @@ function Sparkline({ values, color = '#8BC34A' }: { values: number[]; color?: st
 
 // ─── Main Component ──────────────────────────────────────────────────
 export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
+  const { patientId } = useAuth()
+
   // Data
   const [testNames, setTestNames] = useState<TestName[]>([])
   const [historyCache, setHistoryCache] = useState<Record<string, HistoryPoint[]>>({})
@@ -267,8 +273,11 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
   // Medication timeline data
   const [medTimeline, setMedTimeline] = useState<MedTimelineEntry[]>([])
 
+  // Consultations
+  const [consultationSessions, setConsultationSessions] = useState<any[]>([])
+
   // UI
-  type View = 'overview' | 'detail' | 'summaries' | 'summary-detail' | 'medications'
+  type View = 'overview' | 'detail' | 'summaries' | 'summary-detail' | 'medications' | 'consultations'
   const [view, setView] = useState<View>('overview')
   const [selectedTest, setSelectedTest] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<HealthTimeRange>('all')
@@ -282,10 +291,11 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     const load = async () => {
       setLoading(true)
       try {
-        const [namesRes, summRes, medRes] = await Promise.all([
+        const [namesRes, summRes, medRes, consultRes] = await Promise.all([
           fetch(`${API_BASE_URL}/api/test-results/names`),
           fetch(`${API_BASE_URL}/api/history?limit=50`),
           fetch(`${API_BASE_URL}/api/medications/timeline`),
+          fetch(`${API_BASE_URL}/api/patient/${patientId ?? 1}/consultations`),
         ])
         if (namesRes.ok) {
           const names: TestName[] = await namesRes.json()
@@ -299,6 +309,10 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
         if (medRes.ok) {
           const data: MedTimelineEntry[] = await medRes.json()
           setMedTimeline(data)
+        }
+        if (consultRes.ok) {
+          const data = await consultRes.json()
+          setConsultationSessions(data.consultations || [])
         }
       } catch {
         // silent
@@ -1179,6 +1193,104 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // CONSULTATIONS VIEW — voice consultation session results
+  // ═══════════════════════════════════════════════════════════════════
+  if (view === 'consultations') {
+    const PRIORITY_FIELDS = ['chief_complaint', 'symptoms', 'symptom_description', 'pain_level', 'allergies', 'current_medications']
+
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <button
+          onClick={() => setView('overview')}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition mb-6"
+        >
+          <ChevronLeft className="w-4 h-4" /> Back
+        </button>
+
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-2xl bg-purple-50 flex items-center justify-center">
+            <Mic className="w-5 h-5 text-purple-600" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-light text-gray-900">Consultations</h2>
+            <p className="text-sm text-gray-400">
+              {consultationSessions.length} completed session{consultationSessions.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+
+        {consultationSessions.length === 0 ? (
+          <div className="text-center py-12 text-gray-400 text-sm">
+            No consultations yet. Complete a voice consultation to see results here.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {consultationSessions.map((session: any) => {
+              const fields: any[] = session.fields || []
+              const sortedFields = [...fields].sort((a, b) => {
+                const aIdx = PRIORITY_FIELDS.indexOf(a.field_name)
+                const bIdx = PRIORITY_FIELDS.indexOf(b.field_name)
+                return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
+              })
+              const isEmergency = session.is_emergency === 1 || session.is_emergency === true
+              const completedAt = session.completed_at ? new Date(session.completed_at) : null
+
+              return (
+                <div
+                  key={session.session_id}
+                  className={`rounded-2xl border-2 p-5 ${
+                    isEmergency
+                      ? 'border-red-200 bg-red-50/50'
+                      : 'border-gray-100 bg-white'
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      {isEmergency && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-semibold">
+                          <AlertTriangle className="w-3 h-3" /> Emergency
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">
+                        <CheckCircle2 className="w-3 h-3" /> Completed
+                      </span>
+                    </div>
+                    {completedAt && (
+                      <span className="text-xs text-gray-400">
+                        {completedAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {' · '}
+                        {completedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
+
+                  {sortedFields.length > 0 ? (
+                    <div className="space-y-2">
+                      {sortedFields.map((field: any, idx: number) => (
+                        <div key={idx} className="flex items-start gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-2 shrink-0" />
+                          <div>
+                            <span className="text-xs font-semibold text-purple-600 uppercase tracking-wide">
+                              {field.field_name.replace(/_/g, ' ')}
+                            </span>
+                            <p className="text-sm text-gray-700 mt-0.5">{field.field_value}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">No fields recorded for this session.</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // OVERVIEW — matching Health Dashboard screenshot UI
   // ═══════════════════════════════════════════════════════════════════
 
@@ -1320,6 +1432,25 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
               <p className="text-base font-semibold text-gray-900">Medications</p>
               <p className="text-sm text-gray-500 line-clamp-1 mt-0.5">
                 {medTimeline[medTimeline.length - 1].medications.length} current medication{medTimeline[medTimeline.length - 1].medications.length !== 1 ? 's' : ''} · Track changes & dosages
+              </p>
+            </div>
+            <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />
+          </button>
+        )}
+
+        {/* Consultations card */}
+        {consultationSessions.length > 0 && (
+          <button
+            onClick={() => setView('consultations')}
+            className="w-full flex items-center gap-4 p-5 rounded-2xl bg-gradient-to-r from-purple-50 to-purple-100/50 border-2 border-purple-200/50 hover:shadow-md hover:border-purple-300/50 transition-all text-left"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
+              <Mic className="w-6 h-6 text-purple-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-base font-semibold text-gray-900">Consultations</p>
+              <p className="text-sm text-gray-500 line-clamp-1 mt-0.5">
+                {consultationSessions.length} voice consultation{consultationSessions.length !== 1 ? 's' : ''} · View session results
               </p>
             </div>
             <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />

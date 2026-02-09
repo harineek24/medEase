@@ -1547,7 +1547,7 @@ async def get_available_slots(doctor_id: int, date: str):
             raise HTTPException(status_code=404, detail="Doctor not found")
 
         # Parse available hours
-        available_hours = json.loads(doctor.get('available_hours', '{}'))
+        available_hours = json.loads(doctor.get('available_hours') or '{}')
 
         # Get day of week
         from datetime import datetime as dt
@@ -2098,6 +2098,7 @@ async def doctor_patient_detail(doctor_id: int, patient_id: int):
         insurance = db.get_patient_insurance(patient_id)
         summaries = db.get_patient_summaries(patient_id)
         billing = db.get_patient_billing(patient_id)
+        consultations = db.get_patient_consultations(patient_id)
 
         return JSONResponse(content={
             "patient": patient,
@@ -2110,7 +2111,8 @@ async def doctor_patient_detail(doctor_id: int, patient_id: int):
             "journal_entries": journal,
             "insurance": insurance,
             "summaries": summaries,
-            "billing": billing
+            "billing": billing,
+            "consultations": consultations,
         })
     except HTTPException:
         raise
@@ -2326,6 +2328,30 @@ async def portal_patient_appointments(patient_id: int, limit: int = 20):
         raise HTTPException(status_code=500, detail=f"Error getting appointments: {str(e)}")
 
 
+@app.put("/api/portal/patient/{patient_id}/appointments/{appointment_id}")
+async def portal_patient_update_appointment(patient_id: int, appointment_id: int, request: UpdateAppointmentRequest):
+    """Patient cancels or updates an appointment."""
+    try:
+        updates = {}
+        if request.status:
+            # Patients can only cancel their appointments
+            if request.status not in ["cancelled"]:
+                raise HTTPException(status_code=400, detail="Patients can only cancel appointments")
+            updates['status'] = request.status
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+
+        success = db.update_appointment(appointment_id, **updates)
+        if not success:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        return JSONResponse(content={"success": True, "message": "Appointment updated"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/portal/patient/{patient_id}/labs")
 async def portal_patient_labs(patient_id: int, lab_type: Optional[str] = None):
     """Get patient lab results."""
@@ -2498,6 +2524,100 @@ async def serve_audio(filename: str):
 
 
 # =============================================================================
+# Doctor Feed & Replies
+# =============================================================================
+
+@app.get("/api/doctor/{doctor_id}/feed/patient-updates")
+async def get_doctor_feed_patient_updates(doctor_id: int, days: int = 7):
+    """Get patient health updates for a doctor's patients (last N days)."""
+    try:
+        updates = db.get_patient_updates_for_doctor(doctor_id, days=days)
+        return JSONResponse(content={"updates": updates})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient-updates/{update_id}/detail")
+async def get_patient_update_detail(update_id: int):
+    """Get a single patient update with its doctor replies."""
+    try:
+        update = db.get_patient_update_by_id(update_id)
+        if not update:
+            raise HTTPException(status_code=404, detail="Update not found")
+        replies = db.get_replies_for_update(update_id)
+        return JSONResponse(content={"update": update, "replies": replies})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DoctorReplyRequest(BaseModel):
+    patient_id: int
+    update_id: int
+    reply_text: str
+    audio_url: Optional[str] = None
+    audio_duration: Optional[int] = None
+
+
+@app.post("/api/doctor/{doctor_id}/reply")
+async def post_doctor_reply(doctor_id: int, request: DoctorReplyRequest):
+    """Doctor replies to a patient health update."""
+    try:
+        reply_id = db.add_doctor_reply(
+            doctor_id=doctor_id,
+            patient_id=request.patient_id,
+            update_id=request.update_id,
+            reply_text=request.reply_text,
+            audio_url=request.audio_url,
+            audio_duration=request.audio_duration,
+        )
+        return JSONResponse(content={"id": reply_id, "success": True, "created_at": datetime.now().isoformat()})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/doctor/{doctor_id}/patient/{patient_id}/communications")
+async def get_doctor_patient_comms(doctor_id: int, patient_id: int):
+    """Get all doctor replies to a specific patient (for history view)."""
+    try:
+        comms = db.get_doctor_patient_communications(doctor_id, patient_id)
+        return JSONResponse(content={"communications": comms})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient/{patient_id}/doctor-replies")
+async def get_patient_doctor_replies(patient_id: int):
+    """Get all doctor replies for a patient (patient-side view)."""
+    try:
+        replies = db.get_doctor_replies_for_patient(patient_id)
+        return JSONResponse(content={"replies": replies})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/doctor/{doctor_id}/consultations/today")
+async def get_doctor_consultations_today(doctor_id: int):
+    """Get today's completed consultations for a doctor's patients."""
+    try:
+        consultations = db.get_consultations_for_doctor_today(doctor_id)
+        return JSONResponse(content={"consultations": consultations})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient/{patient_id}/consultations")
+async def get_patient_consultations_endpoint(patient_id: int):
+    """Get all consultations for a patient."""
+    try:
+        consultations = db.get_patient_consultations(patient_id)
+        return JSONResponse(content={"consultations": consultations})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Patient Appointment Booking
 # =============================================================================
 
@@ -2595,7 +2715,21 @@ async def doctor_update_appointment(doctor_id: int, appointment_id: int, request
         if not success:
             raise HTTPException(status_code=404, detail="Appointment not found")
 
-        return JSONResponse(content={"success": True, "message": "Appointment updated"})
+        # Return the updated appointment so the frontend can refresh its state
+        with db.get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT a.*, p.name as patient_name, p.phone as patient_phone,
+                       p.email as patient_email, c.name as clinic_name
+                FROM appointments a
+                LEFT JOIN patients p ON a.patient_id = p.id
+                LEFT JOIN clinics c ON a.clinic_id = c.id
+                WHERE a.id = ?
+            """, (appointment_id,))
+            row = cursor.fetchone()
+            updated_appointment = dict(row) if row else {}
+
+        return JSONResponse(content=updated_appointment)
     except HTTPException:
         raise
     except Exception as e:

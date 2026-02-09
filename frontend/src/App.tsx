@@ -9,18 +9,20 @@ import GeneralChat from './components/GeneralChat'
 import HealthHistory from './components/patient/HealthHistory'
 import PatientUpdates from './components/patient/PatientUpdates'
 import AppointmentBooking from './components/patient/AppointmentBooking'
+import HealthAppointmentCards from './components/patient/HealthAppointmentCards'
+import DoctorUpdatesCard from './components/patient/DoctorUpdatesCard'
 import VoiceConsult from './components/VoiceConsult'
 import { HelixScene } from './components/ui/helix-scene'
 import { Ripple } from './components/ui/material-design-3-ripple'
 import BlurEffect from 'react-progressive-blur'
 import { Upload, Shield, Zap, MessageSquare } from 'lucide-react'
 import AppRouter from '@/AppRouter'
-import { AuthProvider } from '@/contexts/AuthContext'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 
 type AppState = 'upload' | 'processing' | 'results'
 
 // Extended view type that includes the new patient-portal views
-export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'health' | 'appointments'
+export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'appointments'
 
 interface SummaryData {
   summary: string
@@ -95,6 +97,7 @@ interface PatientAppProps {
 }
 
 export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
+  const { patientId } = useAuth()
   // Upload flow state
   const [appState, setAppState] = useState<AppState>('upload')
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null)
@@ -507,29 +510,9 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
     return chartData.filter(d => new Date(d.date).getTime() >= cutoff)
   }, [chartData, healthTimeRange])
 
-  // Render the health dashboard from extracted test results
-  const renderHealthView = () => {
-    if (testResults.length === 0) {
-      return (
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="text-center max-w-md">
-            <div className="w-16 h-16 rounded-full bg-[#8BC34A]/10 flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-[#8BC34A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-light text-gray-900 mb-2">Health Dashboard</h2>
-            <p className="text-gray-500 text-sm">Upload a medical document first to see your health metrics extracted and displayed here.</p>
-            <button
-              onClick={() => onNavigate('upload')}
-              className="mt-4 px-5 py-2.5 rounded-lg bg-[#45BFD3] text-white text-sm font-medium hover:bg-[#3dafc2] transition-colors"
-            >
-              Upload Document
-            </button>
-          </div>
-        </div>
-      )
-    }
+  // Compact health dashboard for the updates page right column
+  const renderHealthDashboard = () => {
+    if (testResults.length === 0) return null
 
     const statusColor = (status: string) => {
       if (status === 'normal') return 'bg-green-50 border-green-200 text-green-700'
@@ -543,12 +526,10 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
       return 'bg-red-100 text-red-700'
     }
 
-    // Split into "vitals" (top row) and "lab results" (bottom grid)
     const vitalKeywords = ['blood pressure', 'bp', 'systolic', 'heart rate', 'pulse', 'oxygen', 'spo2', 'temperature', 'temp', 'respiratory', 'glucose', 'blood sugar']
     const vitalResults = testResults.filter(t => vitalKeywords.some(k => t.name.toLowerCase().includes(k)))
     const labResults = testResults.filter(t => !vitalKeywords.some(k => t.name.toLowerCase().includes(k)))
 
-    // Chart rendering
     const filteredChart = getFilteredChartData()
     const chartValues = filteredChart.map(d => d.value)
     const chartMin = chartValues.length > 0 ? Math.min(...chartValues) : 0
@@ -556,11 +537,10 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
     const chartAvg = chartValues.length > 0 ? Math.round((chartValues.reduce((a, b) => a + b, 0) / chartValues.length) * 10) / 10 : 0
     const chartRange = chartMax - chartMin || 1
 
-    const timeRangeLabels: Record<string, string> = { '1d': '1 day', '1w': '1 week', '1m': '1 month', '1y': '1 year', all: 'All' }
+    const timeRangeLabels: Record<string, string> = { '1d': '1D', '1w': '1W', '1m': '1M', '1y': '1Y', all: 'All' }
 
-    // SVG chart dimensions
-    const svgW = 520, svgH = 200
-    const pad = { top: 20, right: 20, bottom: 30, left: 45 }
+    const svgW = 400, svgH = 180
+    const pad = { top: 20, right: 15, bottom: 30, left: 40 }
     const innerW = svgW - pad.left - pad.right
     const innerH = svgH - pad.top - pad.bottom
 
@@ -571,20 +551,14 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
     }))
 
     const linePath = chartPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
-
-    // Area fill path (line + close to bottom)
     const areaPath = chartPoints.length > 0
       ? linePath + ` L${chartPoints[chartPoints.length - 1].x},${pad.top + innerH} L${chartPoints[0].x},${pad.top + innerH} Z`
       : ''
-
-    // Y-axis ticks
-    const yTickCount = 5
+    const yTickCount = 4
     const yTicks = Array.from({ length: yTickCount }, (_, i) =>
       Math.round((chartMin + (chartRange * i) / (yTickCount - 1)) * 10) / 10
     )
-
-    // X-axis labels
-    const xLabelCount = Math.min(5, filteredChart.length)
+    const xLabelCount = Math.min(4, filteredChart.length)
     const xLabels = xLabelCount > 0 ? Array.from({ length: xLabelCount }, (_, i) => {
       const idx = Math.round((i / Math.max(xLabelCount - 1, 1)) * (filteredChart.length - 1))
       const d = new Date(filteredChart[idx].date)
@@ -592,33 +566,33 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
     }) : []
 
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-full bg-[#8BC34A]/10 flex items-center justify-center">
-            <svg className="w-5 h-5 text-[#8BC34A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-full bg-[#8BC34A]/10 flex items-center justify-center">
+            <svg className="w-4 h-4 text-[#8BC34A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
             </svg>
           </div>
           <div>
-            <h2 className="text-2xl font-light text-gray-900">Health Dashboard</h2>
-            <p className="text-sm text-gray-400">Extracted from your latest document</p>
+            <h3 className="text-base font-semibold text-gray-900">Health Dashboard</h3>
+            <p className="text-xs text-gray-400">From your latest document</p>
           </div>
         </div>
 
-        {/* Vital cards row - clickable */}
+        {/* Vital cards - compact 2-column */}
         {vitalResults.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 gap-3 mb-4">
             {vitalResults.map((test, i) => (
               <div
                 key={i}
                 onClick={() => fetchChartHistory(test.name)}
-                className={`rounded-2xl border p-5 cursor-pointer transition-all duration-200 hover:shadow-md hover:scale-[1.02] ${
+                className={`rounded-xl border p-3 cursor-pointer transition-all duration-200 hover:shadow-md ${
                   selectedHealthCard === test.name ? 'ring-2 ring-[#8BC34A] shadow-md' : ''
                 } ${statusColor(test.status)}`}
               >
-                <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">{test.name}</p>
-                <p className="text-3xl font-bold">{test.value}</p>
-                <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(test.status)}`}>
+                <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">{test.name}</p>
+                <p className="text-xl font-bold">{test.value}</p>
+                <span className={`inline-block mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusBadge(test.status)}`}>
                   {test.status}
                 </span>
               </div>
@@ -628,33 +602,23 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
 
         {/* Expanded chart panel */}
         {selectedHealthCard && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-8">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-gray-50 rounded-xl p-4 mb-4">
+            <div className="flex items-center justify-between mb-3">
               <div>
-                <h3 className="text-xl font-semibold text-gray-900">{selectedHealthCard}</h3>
-                <p className="text-sm text-gray-400">
-                  {filteredChart.length} reading{filteredChart.length !== 1 ? 's' : ''} across uploads
-                </p>
+                <h4 className="text-sm font-semibold text-gray-900">{selectedHealthCard}</h4>
+                <p className="text-xs text-gray-400">{filteredChart.length} reading{filteredChart.length !== 1 ? 's' : ''}</p>
               </div>
-              <button
-                onClick={() => setSelectedHealthCard(null)}
-                className="text-gray-400 hover:text-gray-600 text-xl font-light"
-              >
-                x
-              </button>
+              <button onClick={() => setSelectedHealthCard(null)} className="text-gray-400 hover:text-gray-600 text-sm">x</button>
             </div>
-
-            {/* Time range filter pills */}
-            <div className="flex gap-2 mb-5 flex-wrap">
+            <div className="flex gap-1.5 mb-3 flex-wrap">
               {(Object.keys(timeRangeLabels) as HealthTimeRange[]).map(key => (
                 <button
                   key={key}
                   onClick={() => setHealthTimeRange(key)}
-                  className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors ${
                     healthTimeRange === key
                       ? 'bg-[#8BC34A] text-white'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      : 'bg-white text-gray-500 hover:bg-gray-200'
                   }`}
                 >
                   {timeRangeLabels[key]}
@@ -663,90 +627,50 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
             </div>
 
             {chartLoading ? (
-              <div className="flex items-center justify-center h-52">
-                <div className="h-8 w-8 rounded-full border-3 border-[#8BC34A] border-t-transparent animate-spin" />
+              <div className="flex items-center justify-center h-40">
+                <div className="h-6 w-6 rounded-full border-2 border-[#8BC34A] border-t-transparent animate-spin" />
               </div>
             ) : filteredChart.length === 0 ? (
-              <div className="flex items-center justify-center h-52 text-gray-400 text-sm">
-                No data for this time range.
-              </div>
+              <div className="flex items-center justify-center h-40 text-gray-400 text-xs">No data for this range.</div>
             ) : (
               <>
-                {/* SVG Chart */}
-                <div className="bg-gray-50 rounded-xl p-3 mb-5">
-                  <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-auto">
-                    {/* Grid lines */}
-                    {yTicks.map(val => {
-                      const y = pad.top + innerH - ((val - chartMin) / chartRange) * innerH
-                      return (
-                        <g key={val}>
-                          <line x1={pad.left} x2={svgW - pad.right} y1={y} y2={y} stroke="#e5e7eb" strokeDasharray="4 2" />
-                          <text x={pad.left - 6} y={y + 4} textAnchor="end" className="text-[10px] fill-gray-400">{val}</text>
-                        </g>
-                      )
-                    })}
-
-                    {/* X-axis labels */}
-                    {xLabels.map((lbl, i) => (
-                      <text key={i} x={lbl.x} y={svgH - 6} textAnchor="middle" className="text-[9px] fill-gray-400">{lbl.label}</text>
-                    ))}
-
-                    {/* Area fill */}
-                    <path d={areaPath} fill="url(#healthGrad)" />
-                    <defs>
-                      <linearGradient id="healthGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#8BC34A" stopOpacity="0.3" />
-                        <stop offset="100%" stopColor="#8BC34A" stopOpacity="0.02" />
-                      </linearGradient>
-                    </defs>
-
-                    {/* Line */}
-                    <path d={linePath} fill="none" stroke="#8BC34A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-
-                    {/* Data points */}
-                    {chartPoints.map((p, i) => (
-                      <g key={i}>
-                        <circle cx={p.x} cy={p.y} r={4} fill="#8BC34A" stroke="#fff" strokeWidth={2} />
-                        {/* Value label on hover-visible points (show all if < 10 pts) */}
-                        {filteredChart.length <= 10 && (
-                          <text x={p.x} y={p.y - 10} textAnchor="middle" className="text-[9px] fill-gray-600 font-semibold">
-                            {p.d.value}
-                          </text>
-                        )}
+                <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-auto mb-3">
+                  {yTicks.map(val => {
+                    const y = pad.top + innerH - ((val - chartMin) / chartRange) * innerH
+                    return (
+                      <g key={val}>
+                        <line x1={pad.left} x2={svgW - pad.right} y1={y} y2={y} stroke="#e5e7eb" strokeDasharray="4 2" />
+                        <text x={pad.left - 4} y={y + 3} textAnchor="end" className="text-[9px] fill-gray-400">{val}</text>
                       </g>
-                    ))}
-
-                    {/* Min / Max annotations if enough data */}
-                    {filteredChart.length > 1 && (() => {
-                      const minPt = chartPoints.reduce((a, b) => a.d.value < b.d.value ? a : b)
-                      const maxPt = chartPoints.reduce((a, b) => a.d.value > b.d.value ? a : b)
-                      return (
-                        <>
-                          {filteredChart.length > 10 && (
-                            <>
-                              <text x={minPt.x} y={minPt.y + 16} textAnchor="middle" className="text-[9px] fill-[#e57373] font-semibold">Min {chartMin}</text>
-                              <text x={maxPt.x} y={maxPt.y - 12} textAnchor="middle" className="text-[9px] fill-[#8BC34A] font-semibold">Max {chartMax}</text>
-                            </>
-                          )}
-                        </>
-                      )
-                    })()}
-                  </svg>
-                </div>
-
-                {/* Stats row */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-xl bg-[#8BC34A]/10 p-4 text-center">
-                    <p className="text-xs text-[#6a9a2e] font-semibold uppercase tracking-wide">Max</p>
-                    <p className="text-2xl font-bold text-[#6a9a2e]">{chartMax}</p>
+                    )
+                  })}
+                  {xLabels.map((lbl, i) => (
+                    <text key={i} x={lbl.x} y={svgH - 6} textAnchor="middle" className="text-[8px] fill-gray-400">{lbl.label}</text>
+                  ))}
+                  <path d={areaPath} fill="url(#healthGradCompact)" />
+                  <defs>
+                    <linearGradient id="healthGradCompact" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#8BC34A" stopOpacity="0.3" />
+                      <stop offset="100%" stopColor="#8BC34A" stopOpacity="0.02" />
+                    </linearGradient>
+                  </defs>
+                  <path d={linePath} fill="none" stroke="#8BC34A" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                  {chartPoints.map((p, i) => (
+                    <circle key={i} cx={p.x} cy={p.y} r={3} fill="#8BC34A" stroke="#fff" strokeWidth={1.5} />
+                  ))}
+                </svg>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-lg bg-[#8BC34A]/10 p-2 text-center">
+                    <p className="text-[10px] text-[#6a9a2e] font-semibold">Max</p>
+                    <p className="text-lg font-bold text-[#6a9a2e]">{chartMax}</p>
                   </div>
-                  <div className="rounded-xl bg-[#8BC34A]/10 p-4 text-center">
-                    <p className="text-xs text-[#6a9a2e] font-semibold uppercase tracking-wide">Min</p>
-                    <p className="text-2xl font-bold text-[#6a9a2e]">{chartMin}</p>
+                  <div className="rounded-lg bg-[#8BC34A]/10 p-2 text-center">
+                    <p className="text-[10px] text-[#6a9a2e] font-semibold">Min</p>
+                    <p className="text-lg font-bold text-[#6a9a2e]">{chartMin}</p>
                   </div>
-                  <div className="rounded-xl bg-gray-100 p-4 text-center">
-                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Avg</p>
-                    <p className="text-2xl font-bold text-gray-700">{chartAvg}</p>
+                  <div className="rounded-lg bg-gray-100 p-2 text-center">
+                    <p className="text-[10px] text-gray-500 font-semibold">Avg</p>
+                    <p className="text-lg font-bold text-gray-700">{chartAvg}</p>
                   </div>
                 </div>
               </>
@@ -754,28 +678,26 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
           </div>
         )}
 
-        {/* Lab Results section - also clickable */}
+        {/* Lab Results - compact single column */}
         {labResults.length > 0 && (
           <div>
-            <h3 className="text-lg font-medium text-gray-800 mb-4">Lab Results</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <h4 className="text-sm font-medium text-gray-800 mb-2">Lab Results</h4>
+            <div className="space-y-2">
               {labResults.map((test, i) => (
                 <div
                   key={i}
                   onClick={() => fetchChartHistory(test.name)}
-                  className={`rounded-xl border p-4 flex items-center justify-between cursor-pointer transition-all duration-200 hover:shadow-md ${
+                  className={`rounded-lg border p-3 flex items-center justify-between cursor-pointer transition-all hover:shadow-md ${
                     selectedHealthCard === test.name ? 'ring-2 ring-[#8BC34A] shadow-md' : ''
                   } ${statusColor(test.status)}`}
                 >
                   <div>
-                    <p className="font-medium text-sm">{test.name}</p>
-                    {test.explanation && (
-                      <p className="text-xs opacity-70 mt-0.5">{test.explanation}</p>
-                    )}
+                    <p className="font-medium text-xs">{test.name}</p>
+                    {test.explanation && <p className="text-[10px] opacity-70 mt-0.5">{test.explanation}</p>}
                   </div>
                   <div className="text-right">
-                    <p className="font-bold">{test.value}</p>
-                    <span className={`inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(test.status)}`}>
+                    <p className="font-bold text-sm">{test.value}</p>
+                    <span className={`inline-block mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusBadge(test.status)}`}>
                       {test.status}
                     </span>
                   </div>
@@ -784,6 +706,30 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
             </div>
           </div>
         )}
+      </div>
+    )
+  }
+
+  // Combined updates view: left column (appointments + queries), right column (doctor updates + health dashboard)
+  const renderUpdatesView = () => {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left column — 2/3 */}
+          <div className="lg:col-span-2 space-y-6">
+            <HealthAppointmentCards patientId={patientId ?? 1} onNavigate={onNavigate} />
+            <PatientUpdates />
+          </div>
+
+          {/* Right column — 1/3 */}
+          <div className="space-y-6">
+            {/* Doctor Updates — real replies */}
+            <DoctorUpdatesCard patientId={patientId ?? 1} />
+
+            {/* Health Dashboard (vitals, charts, labs) */}
+            {renderHealthDashboard()}
+          </div>
+        </div>
       </div>
     )
   }
@@ -801,13 +747,10 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
         return <VoiceConsult />
 
       case 'updates':
-        return <PatientUpdates />
-
-      case 'health':
-        return renderHealthView()
+        return renderUpdatesView()
 
       case 'appointments':
-        return <AppointmentBooking patientId={1} />
+        return <AppointmentBooking patientId={patientId ?? 1} />
 
       case 'upload':
       default:

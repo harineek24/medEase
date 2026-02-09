@@ -28,7 +28,7 @@ interface Appointment {
   doctor_specialty: string;
   service: string;
   clinic_name: string;
-  status: 'scheduled' | 'completed' | 'no_show' | 'cancelled';
+  status: 'scheduled' | 'confirmed' | 'completed' | 'no_show' | 'cancelled';
 }
 
 interface PatientAppointmentsProps {
@@ -61,7 +61,7 @@ function isFuture(dateStr: string, timeStr: string): boolean {
 }
 
 const STATUS_CONFIG: Record<
-  Appointment['status'],
+  string,
   { label: string; color: string; bg: string; icon: React.FC<{ className?: string }> }
 > = {
   scheduled: {
@@ -69,6 +69,12 @@ const STATUS_CONFIG: Record<
     color: 'text-[#45BFD3]',
     bg: 'bg-[#45BFD3]/10',
     icon: Clock,
+  },
+  confirmed: {
+    label: 'Confirmed',
+    color: 'text-[#8BC34A]',
+    bg: 'bg-[#8BC34A]/10',
+    icon: CheckCircle,
   },
   completed: {
     label: 'Completed',
@@ -96,7 +102,7 @@ const STATUS_CONFIG: Record<
 
 /** Status badge */
 const StatusBadge: React.FC<{ status: Appointment['status'] }> = ({ status }) => {
-  const cfg = STATUS_CONFIG[status];
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.scheduled;
   const Icon = cfg.icon;
   return (
     <span
@@ -155,7 +161,7 @@ const AppointmentCard: React.FC<{
     </div>
 
     {/* Actions for upcoming appointments */}
-    {upcoming && appt.status === 'scheduled' && (
+    {upcoming && (appt.status === 'scheduled' || appt.status === 'confirmed') && (
       <div className="flex gap-2">
         <button
           onClick={() => onCancel(appt.id)}
@@ -308,8 +314,20 @@ const PatientAppointments: React.FC<PatientAppointmentsProps> = ({ patientId }) 
         `${API_BASE_URL}/api/portal/patient/${patientId}/appointments`,
       );
       if (!res.ok) throw new Error(`Failed to fetch appointments (${res.status})`);
-      const data: Appointment[] = await res.json();
-      setAppointments(data);
+      const data = await res.json();
+      // The API returns { appointments: [...] } with fields like appointment_date, appointment_time, etc.
+      const raw: Record<string, unknown>[] = data.appointments || data;
+      const mapped: Appointment[] = raw.map((a) => ({
+        id: a.id as number,
+        date: (a.appointment_date || a.date) as string,
+        time: (a.appointment_time || a.time) as string,
+        doctor_name: (a.doctor_name || '') as string,
+        doctor_specialty: (a.doctor_specialty || '') as string,
+        service: (a.service_name || a.service || 'Consultation') as string,
+        clinic_name: (a.clinic_name || '') as string,
+        status: (a.status || 'scheduled') as Appointment['status'],
+      }));
+      setAppointments(mapped);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
     } finally {
@@ -345,12 +363,13 @@ const PatientAppointments: React.FC<PatientAppointmentsProps> = ({ patientId }) 
   };
 
   // Split appointments
+  const activeStatuses = ['scheduled', 'confirmed'];
   const upcoming = appointments
-    .filter((a) => isFuture(a.date, a.time) && a.status === 'scheduled')
+    .filter((a) => isFuture(a.date, a.time) && activeStatuses.includes(a.status))
     .sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
 
   const past = appointments
-    .filter((a) => !isFuture(a.date, a.time) || a.status !== 'scheduled')
+    .filter((a) => !isFuture(a.date, a.time) || !activeStatuses.includes(a.status))
     .sort((a, b) => new Date(`${b.date}T${b.time}`).getTime() - new Date(`${a.date}T${a.time}`).getTime());
 
   // ---------------------------------------------------------------------------

@@ -208,7 +208,7 @@ export default function PatientUpdates() {
 
   // ─── Render ───────────────────────────────────────────────────────
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
+    <div>
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">Health Updates</h1>
         <p className="text-gray-500 text-sm">Share updates with your doctor — type or use voice recording</p>

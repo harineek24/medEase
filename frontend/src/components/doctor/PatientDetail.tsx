@@ -13,6 +13,8 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  MessageCircle,
+  Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { API_BASE_URL } from "@/api";
@@ -77,6 +79,23 @@ interface LabResult {
   date: string;
 }
 
+interface ConsultField {
+  field_name: string;
+  field_label: string;
+  field_value: string;
+  confirmed: number;
+}
+
+interface ConsultationSession {
+  id: number;
+  session_id: string;
+  status: string;
+  is_emergency: number;
+  created_at: string;
+  completed_at: string;
+  fields: ConsultField[];
+}
+
 interface PatientDetailData {
   patient_id: number;
   patient_name: string;
@@ -94,6 +113,7 @@ interface PatientDetailData {
   notes: Note[];
   appointments: AppointmentRecord[];
   lab_results: LabResult[];
+  consultations?: ConsultationSession[];
 }
 
 interface PatientDetailProps {
@@ -112,6 +132,8 @@ const TABS = [
   { key: "notes", label: "Notes & Instructions", icon: StickyNote },
   { key: "appointments", label: "Appointments", icon: CalendarDays },
   { key: "labs", label: "Labs & Radiology", icon: FlaskConical },
+  { key: "comms", label: "Communications", icon: MessageCircle },
+  { key: "consultations", label: "Consultations", icon: Mic },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -175,9 +197,37 @@ export default function PatientDetail({ doctorId, patientId }: PatientDetailProp
   });
   const [apptSending, setApptSending] = useState(false);
 
+  /* Communications state */
+  const [comms, setComms] = useState<Array<{
+    id: number;
+    reply_text: string;
+    audio_url: string | null;
+    original_update: string;
+    update_date: string;
+    created_at: string;
+  }>>([]);
+  const [commsLoading, setCommsLoading] = useState(false);
+
   /* ---------------------------------------------------------------- */
   /*  Fetch                                                           */
   /* ---------------------------------------------------------------- */
+
+  const fetchComms = useCallback(async () => {
+    setCommsLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/doctor/${doctorId}/patient/${patientId}/communications`
+      );
+      if (res.ok) {
+        const json = await res.json();
+        setComms(json.communications || []);
+      }
+    } catch (err) {
+      console.error("Error fetching communications:", err);
+    } finally {
+      setCommsLoading(false);
+    }
+  }, [doctorId, patientId]);
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -199,6 +249,13 @@ export default function PatientDetail({ doctorId, patientId }: PatientDetailProp
   useEffect(() => {
     fetchDetail();
   }, [fetchDetail]);
+
+  // Fetch communications when tab switches to comms
+  useEffect(() => {
+    if (tab === "comms" && comms.length === 0 && !commsLoading) {
+      fetchComms();
+    }
+  }, [tab, comms.length, commsLoading, fetchComms]);
 
   /* ---------------------------------------------------------------- */
   /*  Actions                                                         */
@@ -695,6 +752,148 @@ export default function PatientDetail({ doctorId, patientId }: PatientDetailProp
     );
   };
 
+  /* ---------------------------------------------------------------- */
+  /*  Communications tab                                              */
+  /* ---------------------------------------------------------------- */
+
+  const renderComms = () => {
+    if (commsLoading) {
+      return (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="h-6 w-6 animate-spin text-[#45BFD3]" />
+        </div>
+      );
+    }
+
+    if (comms.length === 0) {
+      return (
+        <div className="text-center py-16 text-gray-400">
+          <MessageCircle className="w-10 h-10 mx-auto mb-3 opacity-50" />
+          <p className="text-sm">No communications with this patient yet.</p>
+          <p className="text-xs mt-1">Respond to patient updates from the Feed to start a conversation.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {comms.map((c) => (
+          <div key={c.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            {/* Original patient update */}
+            <div className="bg-gray-50 px-5 py-3 border-b border-gray-100">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Patient Update</p>
+              <p className="text-sm text-gray-700 line-clamp-2">{c.original_update}</p>
+              <p className="text-xs text-gray-400 mt-1">
+                {new Date(c.update_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </p>
+            </div>
+            {/* Doctor reply */}
+            <div className="px-5 py-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-full bg-[#45BFD3] flex items-center justify-center">
+                  <MessageCircle className="w-3 h-3 text-white" />
+                </div>
+                <span className="text-sm font-medium text-gray-900">Your Response</span>
+                <span className="text-xs text-gray-400 ml-auto">
+                  {new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                </span>
+              </div>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{c.reply_text}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Consultations tab                                               */
+  /* ---------------------------------------------------------------- */
+
+  const renderConsultations = () => {
+    const sessions = data.consultations || [];
+
+    if (sessions.length === 0) {
+      return (
+        <div className="text-center py-16 text-gray-400">
+          <Mic className="w-10 h-10 mx-auto mb-3 opacity-50" />
+          <p className="text-sm">No consultations recorded for this patient.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {sessions.map((session) => (
+          <div
+            key={session.id}
+            className={`rounded-xl border overflow-hidden ${
+              session.is_emergency
+                ? "border-red-200 bg-red-50/30"
+                : "border-gray-100 bg-white"
+            }`}
+          >
+            {/* Header */}
+            <div
+              className={`px-5 py-3 flex items-center justify-between border-b ${
+                session.is_emergency
+                  ? "bg-red-50 border-red-100"
+                  : "bg-gray-50 border-gray-100"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Mic className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-medium text-gray-900">
+                  Voice Consultation
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                {session.is_emergency ? (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">
+                    Emergency
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">
+                    Completed
+                  </span>
+                )}
+                <span className="text-xs text-gray-400">
+                  {session.completed_at
+                    ? new Date(session.completed_at).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : new Date(session.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Fields */}
+            <div className="px-5 py-4">
+              {session.fields.length === 0 ? (
+                <p className="text-sm text-gray-400">No fields collected.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {session.fields.map((f, i) => (
+                    <div key={i}>
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                        {f.field_label}
+                      </p>
+                      <p className="text-sm text-gray-800 mt-0.5">{f.field_value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const tabContent: Record<TabKey, () => React.ReactNode> = {
     history: renderHistory,
     vitals: renderVitals,
@@ -702,6 +901,8 @@ export default function PatientDetail({ doctorId, patientId }: PatientDetailProp
     notes: renderNotes,
     appointments: renderAppointments,
     labs: renderLabs,
+    comms: renderComms,
+    consultations: renderConsultations,
   };
 
   /* ---------------------------------------------------------------- */

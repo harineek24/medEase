@@ -8,6 +8,8 @@ import Dashboard from '@/components/Dashboard'
 import ConsultConfig from '@/components/ConsultConfig'
 import DoctorHistory from '@/components/doctor/DoctorHistory'
 import DoctorCalendar from '@/components/doctor/DoctorCalendar'
+import DoctorFeed from '@/components/doctor/DoctorFeed'
+import DoctorReplyPage from '@/components/doctor/DoctorReplyPage'
 import AdminPatientRegistration from '@/components/clinicadmin/AdminPatientRegistration'
 import AdminDoctorManagement from '@/components/clinicadmin/AdminDoctorManagement'
 import type { ReactNode } from 'react'
@@ -89,7 +91,8 @@ export default function AppRouter() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<PlaceholderPage title="Doctor Feed" />} />
+        <Route index element={<DoctorFeed />} />
+        <Route path="reply/:updateId" element={<DoctorReplyPage />} />
         <Route path="dashboard" element={<Dashboard onViewHistory={() => {}} />} />
         <Route path="patients" element={<PlaceholderPage title="Patients" />} />
         <Route path="history" element={<DoctorHistory />} />
