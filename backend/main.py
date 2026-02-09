@@ -1547,7 +1547,7 @@ async def get_available_slots(doctor_id: int, date: str):
             raise HTTPException(status_code=404, detail="Doctor not found")
 
         # Parse available hours
-        available_hours = json.loads(doctor.get('available_hours', '{}'))
+        available_hours = json.loads(doctor.get('available_hours') or '{}')
 
         # Get day of week
         from datetime import datetime as dt
@@ -2326,6 +2326,30 @@ async def portal_patient_appointments(patient_id: int, limit: int = 20):
         raise HTTPException(status_code=500, detail=f"Error getting appointments: {str(e)}")
 
 
+@app.put("/api/portal/patient/{patient_id}/appointments/{appointment_id}")
+async def portal_patient_update_appointment(patient_id: int, appointment_id: int, request: UpdateAppointmentRequest):
+    """Patient cancels or updates an appointment."""
+    try:
+        updates = {}
+        if request.status:
+            # Patients can only cancel their appointments
+            if request.status not in ["cancelled"]:
+                raise HTTPException(status_code=400, detail="Patients can only cancel appointments")
+            updates['status'] = request.status
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+
+        success = db.update_appointment(appointment_id, **updates)
+        if not success:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        return JSONResponse(content={"success": True, "message": "Appointment updated"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/portal/patient/{patient_id}/labs")
 async def portal_patient_labs(patient_id: int, lab_type: Optional[str] = None):
     """Get patient lab results."""
@@ -2595,7 +2619,21 @@ async def doctor_update_appointment(doctor_id: int, appointment_id: int, request
         if not success:
             raise HTTPException(status_code=404, detail="Appointment not found")
 
-        return JSONResponse(content={"success": True, "message": "Appointment updated"})
+        # Return the updated appointment so the frontend can refresh its state
+        with db.get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT a.*, p.name as patient_name, p.phone as patient_phone,
+                       p.email as patient_email, c.name as clinic_name
+                FROM appointments a
+                LEFT JOIN patients p ON a.patient_id = p.id
+                LEFT JOIN clinics c ON a.clinic_id = c.id
+                WHERE a.id = ?
+            """, (appointment_id,))
+            row = cursor.fetchone()
+            updated_appointment = dict(row) if row else {}
+
+        return JSONResponse(content=updated_appointment)
     except HTTPException:
         raise
     except Exception as e:

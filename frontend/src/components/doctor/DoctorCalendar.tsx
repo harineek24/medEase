@@ -287,6 +287,7 @@ export default function DoctorCalendar({ doctorId: propDoctorId }: DoctorCalenda
         );
         if (!res.ok) throw new Error(`Update failed (${res.status})`);
         const updated: Appointment = await res.json();
+        // Update local state optimistically
         setAppointments((prev) =>
           prev.map((a) => (a.id === appointmentId ? { ...a, ...updated } : a))
         );
@@ -294,6 +295,8 @@ export default function DoctorCalendar({ doctorId: propDoctorId }: DoctorCalenda
           prev?.id === appointmentId ? { ...prev, ...updated } : prev
         );
         setModifying(false);
+        // Refetch to ensure calendar is fully in sync (handles date/time moves)
+        fetchAppointments();
       } catch (err: unknown) {
         const message =
           err instanceof Error ? err.message : "Action failed";
@@ -302,7 +305,7 @@ export default function DoctorCalendar({ doctorId: propDoctorId }: DoctorCalenda
         setActionLoading(false);
       }
     },
-    [doctorId]
+    [doctorId, fetchAppointments]
   );
 
   /* ---------- Navigation ---------- */

@@ -82,6 +82,34 @@ interface Doctor {
   photo_url?: string;
 }
 
+/** Normalize a languages value from the API (may be a string or array) into a string[]. */
+function normalizeLanguages(val: unknown): string[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string" && val.trim()) {
+    return val.split(",").map((l) => l.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+/** Normalize an accepted_insurance value from the API (may be a string or array) into a string[]. */
+function normalizeInsurance(val: unknown): string[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string" && val.trim()) {
+    return val.split(",").map((p) => p.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+/** Normalize a raw doctor object from the API. */
+function normalizeDoctor(raw: Record<string, unknown>): Doctor {
+  return {
+    ...raw,
+    languages: normalizeLanguages(raw.languages),
+    accepted_insurance: normalizeInsurance(raw.accepted_insurance),
+    consultation_fee: Number(raw.consultation_fee) || 0,
+  } as Doctor;
+}
+
 interface Clinic {
   id: number;
   name: string;
@@ -189,7 +217,8 @@ export default function AdminDoctorManagement() {
       const res = await fetch(`${API_BASE_URL}/api/doctors`);
       if (!res.ok) throw new Error(`Failed to fetch doctors (${res.status})`);
       const data = await res.json();
-      setDoctors(data.doctors || data);
+      const raw: Record<string, unknown>[] = data.doctors || data;
+      setDoctors(raw.map(normalizeDoctor));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -270,15 +299,12 @@ export default function AdminDoctorManagement() {
         email: form.email.trim(),
         phone: form.phone.trim(),
         bio: form.bio.trim() || undefined,
-        languages: form.languages
-          .split(",")
-          .map((l) => l.trim())
-          .filter(Boolean),
+        languages: form.languages.trim() || "English",
         education: form.education.trim() || undefined,
         certifications: form.certifications.trim() || undefined,
         consultation_fee: parseFloat(form.consultation_fee) || 0,
         clinic_id: form.clinic_id ? Number(form.clinic_id) : undefined,
-        accepted_insurance: form.accepted_insurance,
+        accepted_insurance: form.accepted_insurance.join(",") || undefined,
       };
 
       const res = await fetch(`${API_BASE_URL}/api/clinicadmin/doctors`, {
