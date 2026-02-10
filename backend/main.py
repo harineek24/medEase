@@ -3151,6 +3151,32 @@ async def get_eligibility_history(patient_id: Optional[int] = None, limit: int =
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/clinicadmin/eligibility/status")
+async def eligibility_status():
+    """Return eligibility service mode (live vs simulated)."""
+    return JSONResponse(content=eligibility_service.get_status())
+
+
+class EligibilitySettingsRequest(BaseModel):
+    api_key: Optional[str] = None
+    provider_npi: Optional[str] = None
+    provider_name: Optional[str] = None
+    provider_org: Optional[str] = None
+
+
+@app.post("/api/clinicadmin/eligibility/settings")
+async def update_eligibility_settings(req: EligibilitySettingsRequest):
+    """Update eligibility service configuration at runtime."""
+    if req.api_key is not None:
+        eligibility_service.set_api_key(req.api_key)
+    eligibility_service.set_provider_info(
+        npi=req.provider_npi,
+        name=req.provider_name,
+        org=req.provider_org,
+    )
+    return JSONResponse(content=eligibility_service.get_status())
+
+
 # --- Payments ---
 
 @app.post("/api/clinicadmin/payments")

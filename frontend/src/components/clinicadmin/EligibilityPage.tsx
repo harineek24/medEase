@@ -1,11 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useCallback, Fragment } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ShieldPlus,
   Loader2,
   CheckCircle2,
   XCircle,
   ChevronDown,
+  Settings,
+  X,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +36,8 @@ interface EligibilityResult {
   termination_date: string | null;
   denial_reason: string | null;
   checked_at: string;
+  _source?: string;
+  _error?: string;
 }
 
 interface HistoryRecord {
@@ -43,26 +49,50 @@ interface HistoryRecord {
   checked_at: string;
 }
 
+interface ServiceStatus {
+  mode: string;
+  api_key_set: boolean;
+  provider_npi: string;
+  provider_name: string;
+  provider_org: string;
+}
+
 export default function EligibilityPage() {
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<ServiceStatus | null>(null);
 
   const [form, setForm] = useState({ patient_id: "", payer_name: "", date_of_service: "" });
   const [verifying, setVerifying] = useState(false);
   const [result, setResult] = useState<EligibilityResult | null>(null);
 
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState({ api_key: "", provider_npi: "", provider_name: "", provider_org: "" });
+  const [savingSettings, setSavingSettings] = useState(false);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [pRes, hRes] = await Promise.all([
+      const [pRes, hRes, sRes] = await Promise.all([
         fetch(`${API}/api/patients`),
         fetch(`${API}/api/clinicadmin/eligibility/history`),
+        fetch(`${API}/api/clinicadmin/eligibility/status`),
       ]);
       if (pRes.ok) setPatients(await pRes.json());
       if (hRes.ok) {
         const data = await hRes.json();
         setHistory(data.checks || []);
+      }
+      if (sRes.ok) {
+        const s: ServiceStatus = await sRes.json();
+        setStatus(s);
+        setSettings(prev => ({
+          ...prev,
+          provider_npi: s.provider_npi || "",
+          provider_name: s.provider_name || "",
+          provider_org: s.provider_org || "",
+        }));
       }
     } catch {
       // silently ignore fetch errors
@@ -98,13 +128,65 @@ export default function EligibilityPage() {
     }
   };
 
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const res = await fetch(`${API}/api/clinicadmin/eligibility/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: settings.api_key || null,
+          provider_npi: settings.provider_npi || null,
+          provider_name: settings.provider_name || null,
+          provider_org: settings.provider_org || null,
+        }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      const updated: ServiceStatus = await res.json();
+      setStatus(updated);
+      setShowSettings(false);
+      setSettings(prev => ({ ...prev, api_key: "" }));
+    } catch {
+      alert("Failed to save settings.");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex h-96 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[#45BFD3]" /></div>;
   }
 
+  const isLive = status?.mode === "live";
+
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-      <h1 className="text-2xl font-bold text-gray-900 md:text-3xl">Eligibility Verification</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-2xl font-bold text-gray-900 md:text-3xl">Eligibility Verification</h1>
+        <div className="flex items-center gap-3">
+          {/* Mode badge */}
+          <span className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
+            isLive ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+          )}>
+            {isLive ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+            {isLive ? "Live (Stedi API)" : "Simulated"}
+          </span>
+          <button onClick={() => setShowSettings(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">
+            <Settings className="h-4 w-4" /> Settings
+          </button>
+        </div>
+      </div>
+
+      {/* Info banner when simulated */}
+      {!isLive && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Running in <strong>simulated mode</strong>. To connect to real payer systems, click <strong>Settings</strong> and enter your Stedi API key.
+          <a href="https://www.stedi.com" target="_blank" rel="noopener noreferrer" className="ml-1 underline hover:text-amber-900">Get a free key</a>
+        </div>
+      )}
 
       {/* Verification Form */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -147,15 +229,35 @@ export default function EligibilityPage() {
       {result && (
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
           className={cn("rounded-xl border p-6 shadow-sm", result.is_eligible ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50")}>
-          <div className="flex items-center gap-3 mb-4">
-            {result.is_eligible ? <CheckCircle2 className="h-8 w-8 text-green-600" /> : <XCircle className="h-8 w-8 text-red-600" />}
-            <div>
-              <h3 className={cn("text-lg font-bold", result.is_eligible ? "text-green-700" : "text-red-700")}>
-                {result.is_eligible ? "Eligible" : "Not Eligible"}
-              </h3>
-              {result.denial_reason && <p className="text-sm text-red-600">{result.denial_reason}</p>}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              {result.is_eligible ? <CheckCircle2 className="h-8 w-8 text-green-600" /> : <XCircle className="h-8 w-8 text-red-600" />}
+              <div>
+                <h3 className={cn("text-lg font-bold", result.is_eligible ? "text-green-700" : "text-red-700")}>
+                  {result.is_eligible ? "Eligible" : "Not Eligible"}
+                </h3>
+                {result.denial_reason && <p className="text-sm text-red-600">{result.denial_reason}</p>}
+              </div>
             </div>
+            {/* Source badge */}
+            {result._source && (
+              <span className={cn(
+                "rounded-full px-2.5 py-0.5 text-xs font-medium",
+                result._source === "stedi_live" ? "bg-green-100 text-green-700" :
+                result._source === "simulated_fallback" ? "bg-orange-100 text-orange-700" :
+                "bg-gray-100 text-gray-600"
+              )}>
+                {result._source === "stedi_live" ? "Live Data" :
+                 result._source === "simulated_fallback" ? "Fallback (API error)" :
+                 "Simulated"}
+              </span>
+            )}
           </div>
+          {result._error && (
+            <div className="mb-3 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 text-xs text-orange-700">
+              API error: {result._error} — showing simulated data as fallback.
+            </div>
+          )}
           {result.is_eligible && (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               <InfoItem label="Plan" value={result.plan_name || "-"} />
@@ -213,6 +315,65 @@ export default function EligibilityPage() {
           </table>
         </div>
       </div>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {showSettings && (
+          <Fragment>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-black/40" onClick={() => setShowSettings(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="fixed inset-x-4 top-[8%] z-50 mx-auto max-w-lg rounded-2xl bg-white p-6 shadow-xl sm:inset-x-auto sm:w-full">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900">Eligibility API Settings</h2>
+                <button onClick={() => setShowSettings(false)} className="rounded-full p-1 text-gray-400 hover:bg-gray-100"><X className="h-5 w-5" /></button>
+              </div>
+
+              <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+                <p className="font-medium text-gray-800 mb-1">Current Mode: <span className={isLive ? "text-green-700" : "text-amber-700"}>{isLive ? "Live (Stedi API)" : "Simulated"}</span></p>
+                <p>Connect to <a href="https://www.stedi.com" target="_blank" rel="noopener noreferrer" className="text-[#45BFD3] underline">Stedi</a> for real-time eligibility checks against 3,400+ payers. Free sandbox + 100 free production transactions/month.</p>
+              </div>
+
+              <form onSubmit={handleSaveSettings} className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Stedi API Key</label>
+                  <input type="password" value={settings.api_key}
+                    onChange={e => setSettings(s => ({ ...s, api_key: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-[#45BFD3] focus:ring-2 focus:ring-[#45BFD3]/30 outline-none transition"
+                    placeholder={status?.api_key_set ? "Key configured (enter new to change)" : "Enter your Stedi API key"} />
+                  <p className="mt-1 text-xs text-gray-400">Leave blank to keep current key. Clear to switch to simulation mode.</p>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Provider NPI</label>
+                  <input type="text" value={settings.provider_npi}
+                    onChange={e => setSettings(s => ({ ...s, provider_npi: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-[#45BFD3] focus:ring-2 focus:ring-[#45BFD3]/30 outline-none transition"
+                    placeholder="10-digit NPI" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Provider Name</label>
+                    <input type="text" value={settings.provider_name}
+                      onChange={e => setSettings(s => ({ ...s, provider_name: e.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-[#45BFD3] focus:ring-2 focus:ring-[#45BFD3]/30 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Organization</label>
+                    <input type="text" value={settings.provider_org}
+                      onChange={e => setSettings(s => ({ ...s, provider_org: e.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-[#45BFD3] focus:ring-2 focus:ring-[#45BFD3]/30 outline-none transition" />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button type="button" onClick={() => setShowSettings(false)} className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">Cancel</button>
+                  <button type="submit" disabled={savingSettings} className="inline-flex items-center gap-2 rounded-lg bg-[#45BFD3] px-5 py-2.5 text-sm font-medium text-white shadow hover:bg-[#3caebb] transition disabled:opacity-60">
+                    {savingSettings && <Loader2 className="h-4 w-4 animate-spin" />} Save Settings
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </Fragment>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
