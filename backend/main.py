@@ -780,7 +780,7 @@ async def get_patients(search: Optional[str] = None):
             patients = db.search_patients(search)
         else:
             patients = db.get_all_patients()
-        return JSONResponse(content={"patients": patients, "count": len(patients)})
+        return JSONResponse(content=patients)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting patients: {str(e)}")
 
@@ -2021,7 +2021,20 @@ async def clinicadmin_billing(status: Optional[str] = None, limit: int = 100):
     """All billing records with optional status filter."""
     try:
         records = db.get_all_billing(status=status, limit=limit)
-        return JSONResponse(content={"billing": records, "count": len(records)})
+        # Map fields to match frontend expectations
+        mapped = []
+        for r in records:
+            mapped.append({
+                "id": r["id"],
+                "patient_name": r.get("patient_name", ""),
+                "description": r.get("description", ""),
+                "amount": r.get("amount", 0),
+                "insurance_covered": r.get("insurance_covered", 0),
+                "patient_owes": r.get("patient_responsibility", 0),
+                "status": r.get("status", "pending"),
+                "date": r.get("created_at", ""),
+            })
+        return JSONResponse(content=mapped)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting billing records: {str(e)}")
 
@@ -2031,7 +2044,13 @@ async def clinicadmin_billing_summary():
     """Billing summary stats."""
     try:
         summary = db.get_billing_summary()
-        return JSONResponse(content=summary)
+        # Map to match frontend BillingDashboard field names
+        return JSONResponse(content={
+            "total_billed": summary.get("total_billed", 0),
+            "insurance_covered": summary.get("total_insurance_covered", 0),
+            "outstanding_balance": summary.get("outstanding_balance", 0),
+            "pending_claims": summary.get("pending_claims", 0),
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting billing summary: {str(e)}")
 
@@ -2062,8 +2081,24 @@ async def clinicadmin_create_billing(request: CreateBillingRequest):
 async def clinicadmin_patient_insurance(patient_id: int):
     """Get patient insurance information."""
     try:
-        insurance = db.get_patient_insurance(patient_id)
-        return JSONResponse(content={"insurance": insurance, "count": len(insurance)})
+        insurance_list = db.get_patient_insurance(patient_id)
+        if not insurance_list:
+            return JSONResponse(content=None)
+        # Return the primary insurance as a flat object matching frontend InsuranceInfo
+        ins = insurance_list[0]
+        today = datetime.now().strftime("%Y-%m-%d")
+        exp = ins.get("expiration_date")
+        is_active = not exp or exp >= today
+        return JSONResponse(content={
+            "provider": ins.get("provider_name", ""),
+            "policy_number": ins.get("policy_number", ""),
+            "group_number": ins.get("group_number", ""),
+            "copay": ins.get("copay", 0) or 0,
+            "deductible": ins.get("deductible", 0) or 0,
+            "status": "active" if is_active else "inactive",
+            "effective_date": ins.get("effective_date"),
+            "expiry_date": ins.get("expiration_date"),
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting insurance: {str(e)}")
 
