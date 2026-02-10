@@ -4,6 +4,7 @@ SQLite database with SQLAlchemy for storing patient records, summaries, and chat
 """
 
 import os
+import json
 import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -384,6 +385,130 @@ def init_database():
                 deductible REAL,
                 deductible_met REAL DEFAULT 0,
                 is_primary INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id)
+            )
+        """)
+
+        # Claims table - CMS-1500 medical claims
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS claims (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                provider_id INTEGER,
+                insurance_id INTEGER,
+                claim_number TEXT UNIQUE,
+                claim_type TEXT DEFAULT 'professional',
+                status TEXT DEFAULT 'draft',
+                diagnosis_codes TEXT,
+                total_charge REAL DEFAULT 0,
+                total_allowed REAL DEFAULT 0,
+                total_paid REAL DEFAULT 0,
+                patient_responsibility REAL DEFAULT 0,
+                place_of_service TEXT DEFAULT '11',
+                date_of_service TEXT,
+                filing_date TEXT,
+                adjudication_date TEXT,
+                notes TEXT,
+                scrub_results TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (provider_id) REFERENCES doctors(id),
+                FOREIGN KEY (insurance_id) REFERENCES insurance(id)
+            )
+        """)
+
+        # Claim line items
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS claim_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                claim_id INTEGER NOT NULL,
+                line_number INTEGER DEFAULT 1,
+                cpt_code TEXT NOT NULL,
+                cpt_description TEXT,
+                icd_codes TEXT,
+                modifier TEXT,
+                units INTEGER DEFAULT 1,
+                charge_amount REAL NOT NULL,
+                allowed_amount REAL DEFAULT 0,
+                paid_amount REAL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (claim_id) REFERENCES claims(id) ON DELETE CASCADE
+            )
+        """)
+
+        # Revenue cycle events - tracks claim lifecycle
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS revenue_cycle_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                claim_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                old_status TEXT,
+                new_status TEXT,
+                details TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (claim_id) REFERENCES claims(id) ON DELETE CASCADE
+            )
+        """)
+
+        # Payments ledger
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                claim_id INTEGER,
+                billing_id INTEGER,
+                amount REAL NOT NULL,
+                payment_method TEXT DEFAULT 'credit_card',
+                payment_type TEXT DEFAULT 'patient',
+                reference_number TEXT,
+                notes TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (claim_id) REFERENCES claims(id),
+                FOREIGN KEY (billing_id) REFERENCES billing(id)
+            )
+        """)
+
+        # Eligibility verification checks
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS eligibility_checks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                insurance_id INTEGER,
+                payer_name TEXT,
+                status TEXT DEFAULT 'pending',
+                is_eligible INTEGER,
+                coverage_type TEXT,
+                copay REAL,
+                deductible REAL,
+                deductible_met REAL,
+                coinsurance_percent REAL,
+                out_of_pocket_max REAL,
+                out_of_pocket_met REAL,
+                plan_name TEXT,
+                effective_date TEXT,
+                termination_date TEXT,
+                response_data TEXT,
+                checked_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (insurance_id) REFERENCES insurance(id)
+            )
+        """)
+
+        # Patient statements
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS statements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id INTEGER NOT NULL,
+                statement_number TEXT UNIQUE,
+                total_amount REAL NOT NULL,
+                amount_paid REAL DEFAULT 0,
+                amount_due REAL NOT NULL,
+                due_date TEXT,
+                status TEXT DEFAULT 'open',
+                line_items TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (patient_id) REFERENCES patients(id)
             )
@@ -2514,6 +2639,316 @@ def get_patient_insurance(patient_id: int) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM insurance WHERE patient_id = ? ORDER BY is_primary DESC", (patient_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# Claims Operations
+# =============================================================================
+
+def create_claim(patient_id: int, provider_id: int = None, insurance_id: int = None,
+                 claim_type: str = 'professional', diagnosis_codes: str = None,
+                 place_of_service: str = '11', date_of_service: str = None,
+                 notes: str = None) -> Dict:
+    import uuid
+    claim_number = f"CLM-{uuid.uuid4().hex[:8].upper()}"
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO claims (patient_id, provider_id, insurance_id, claim_number,
+                               claim_type, diagnosis_codes, place_of_service,
+                               date_of_service, notes, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+        """, (patient_id, provider_id, insurance_id, claim_number,
+              claim_type, diagnosis_codes, place_of_service, date_of_service, notes))
+        claim_id = cursor.lastrowid
+        # Log creation event
+        cursor.execute("""
+            INSERT INTO revenue_cycle_events (claim_id, event_type, new_status, details)
+            VALUES (?, 'created', 'draft', 'Claim created')
+        """, (claim_id,))
+        return {"id": claim_id, "claim_number": claim_number}
+
+
+def add_claim_line(claim_id: int, cpt_code: str, charge_amount: float,
+                   cpt_description: str = None, icd_codes: str = None,
+                   modifier: str = None, units: int = 1) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # Get next line number
+        cursor.execute("SELECT COALESCE(MAX(line_number), 0) + 1 as next_line FROM claim_lines WHERE claim_id = ?", (claim_id,))
+        next_line = cursor.fetchone()['next_line']
+        cursor.execute("""
+            INSERT INTO claim_lines (claim_id, line_number, cpt_code, cpt_description,
+                                     icd_codes, modifier, units, charge_amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (claim_id, next_line, cpt_code, cpt_description, icd_codes, modifier, units, charge_amount))
+        # Update claim total
+        cursor.execute("""
+            UPDATE claims SET total_charge = (SELECT SUM(charge_amount * units) FROM claim_lines WHERE claim_id = ?),
+                             updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (claim_id, claim_id))
+        return cursor.lastrowid
+
+
+def get_claim(claim_id: int) -> Optional[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT c.*, p.name as patient_name, d.first_name || ' ' || d.last_name as provider_name,
+                   ins.provider_name as insurance_name
+            FROM claims c
+            LEFT JOIN patients p ON c.patient_id = p.id
+            LEFT JOIN doctors d ON c.provider_id = d.id
+            LEFT JOIN insurance ins ON c.insurance_id = ins.id
+            WHERE c.id = ?
+        """, (claim_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        claim = dict(row)
+        # Get line items
+        cursor.execute("SELECT * FROM claim_lines WHERE claim_id = ? ORDER BY line_number", (claim_id,))
+        claim['lines'] = [dict(r) for r in cursor.fetchall()]
+        # Get events
+        cursor.execute("SELECT * FROM revenue_cycle_events WHERE claim_id = ? ORDER BY created_at DESC", (claim_id,))
+        claim['events'] = [dict(r) for r in cursor.fetchall()]
+        return claim
+
+
+def get_all_claims(status: str = None, limit: int = 100) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT c.*, p.name as patient_name, d.first_name || ' ' || d.last_name as provider_name,
+                   ins.provider_name as insurance_name
+            FROM claims c
+            LEFT JOIN patients p ON c.patient_id = p.id
+            LEFT JOIN doctors d ON c.provider_id = d.id
+            LEFT JOIN insurance ins ON c.insurance_id = ins.id
+        """
+        params = []
+        if status:
+            query += " WHERE c.status = ?"
+            params.append(status)
+        query += " ORDER BY c.created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def update_claim_status(claim_id: int, new_status: str, details: str = None) -> bool:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT status FROM claims WHERE id = ?", (claim_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        old_status = row['status']
+        cursor.execute("UPDATE claims SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                       (new_status, claim_id))
+        cursor.execute("""
+            INSERT INTO revenue_cycle_events (claim_id, event_type, old_status, new_status, details)
+            VALUES (?, 'status_change', ?, ?, ?)
+        """, (claim_id, old_status, new_status, details or f"Status changed to {new_status}"))
+        return True
+
+
+def get_claims_summary() -> Dict:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as total FROM claims")
+        total = cursor.fetchone()['total']
+        cursor.execute("SELECT status, COUNT(*) as count FROM claims GROUP BY status")
+        by_status = {row['status']: row['count'] for row in cursor.fetchall()}
+        cursor.execute("SELECT SUM(total_charge) as total_charges FROM claims")
+        total_charges = cursor.fetchone()['total_charges'] or 0
+        cursor.execute("SELECT SUM(total_paid) as total_paid FROM claims")
+        total_paid = cursor.fetchone()['total_paid'] or 0
+        return {
+            "total_claims": total,
+            "by_status": by_status,
+            "total_charges": total_charges,
+            "total_paid": total_paid,
+            "outstanding": total_charges - total_paid
+        }
+
+
+# =============================================================================
+# Eligibility Check Operations
+# =============================================================================
+
+def create_eligibility_check(patient_id: int, insurance_id: int = None,
+                             payer_name: str = None, result: Dict = None) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO eligibility_checks (patient_id, insurance_id, payer_name, status,
+                is_eligible, coverage_type, copay, deductible, deductible_met,
+                coinsurance_percent, out_of_pocket_max, out_of_pocket_met,
+                plan_name, effective_date, termination_date, response_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            patient_id, insurance_id, payer_name,
+            'completed' if result else 'pending',
+            result.get('is_eligible') if result else None,
+            result.get('coverage_type') if result else None,
+            result.get('copay') if result else None,
+            result.get('deductible') if result else None,
+            result.get('deductible_met') if result else None,
+            result.get('coinsurance_percent') if result else None,
+            result.get('out_of_pocket_max') if result else None,
+            result.get('out_of_pocket_met') if result else None,
+            result.get('plan_name') if result else None,
+            result.get('effective_date') if result else None,
+            result.get('termination_date') if result else None,
+            json.dumps(result) if result else None,
+        ))
+        return cursor.lastrowid
+
+
+def get_eligibility_history(patient_id: int = None, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if patient_id:
+            cursor.execute("""
+                SELECT ec.*, p.name as patient_name
+                FROM eligibility_checks ec
+                JOIN patients p ON ec.patient_id = p.id
+                WHERE ec.patient_id = ?
+                ORDER BY ec.checked_at DESC LIMIT ?
+            """, (patient_id, limit))
+        else:
+            cursor.execute("""
+                SELECT ec.*, p.name as patient_name
+                FROM eligibility_checks ec
+                JOIN patients p ON ec.patient_id = p.id
+                ORDER BY ec.checked_at DESC LIMIT ?
+            """, (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# Payment Operations
+# =============================================================================
+
+def record_payment(patient_id: int, amount: float, payment_method: str = 'credit_card',
+                   payment_type: str = 'patient', claim_id: int = None,
+                   billing_id: int = None, reference_number: str = None,
+                   notes: str = None) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if not reference_number:
+            import uuid
+            reference_number = f"PAY-{uuid.uuid4().hex[:8].upper()}"
+        cursor.execute("""
+            INSERT INTO payments (patient_id, claim_id, billing_id, amount,
+                                  payment_method, payment_type, reference_number, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (patient_id, claim_id, billing_id, amount, payment_method,
+              payment_type, reference_number, notes))
+        # Update claim if linked
+        if claim_id:
+            cursor.execute("""
+                UPDATE claims SET total_paid = total_paid + ?,
+                                  patient_responsibility = CASE WHEN patient_responsibility > ? THEN patient_responsibility - ? ELSE 0 END,
+                                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (amount, amount, amount, claim_id))
+        # Update billing record if linked
+        if billing_id:
+            cursor.execute("""
+                UPDATE billing SET status = 'paid', payment_date = CURRENT_TIMESTAMP WHERE id = ?
+            """, (billing_id,))
+        return cursor.lastrowid
+
+
+def get_payments(patient_id: int = None, limit: int = 100) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if patient_id:
+            cursor.execute("""
+                SELECT py.*, p.name as patient_name
+                FROM payments py
+                JOIN patients p ON py.patient_id = p.id
+                WHERE py.patient_id = ?
+                ORDER BY py.created_at DESC LIMIT ?
+            """, (patient_id, limit))
+        else:
+            cursor.execute("""
+                SELECT py.*, p.name as patient_name
+                FROM payments py
+                JOIN patients p ON py.patient_id = p.id
+                ORDER BY py.created_at DESC LIMIT ?
+            """, (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_payment_summary() -> Dict:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT SUM(amount) as total FROM payments")
+        total = cursor.fetchone()['total'] or 0
+        cursor.execute("SELECT SUM(amount) as total FROM payments WHERE payment_type = 'patient'")
+        patient_total = cursor.fetchone()['total'] or 0
+        cursor.execute("SELECT SUM(amount) as total FROM payments WHERE payment_type = 'insurance'")
+        insurance_total = cursor.fetchone()['total'] or 0
+        cursor.execute("SELECT COUNT(*) as count FROM payments WHERE created_at >= date('now', '-30 days')")
+        recent_count = cursor.fetchone()['count']
+        return {
+            "total_collected": total,
+            "patient_payments": patient_total,
+            "insurance_payments": insurance_total,
+            "recent_transactions": recent_count
+        }
+
+
+# =============================================================================
+# Statement Operations
+# =============================================================================
+
+def create_statement(patient_id: int, total_amount: float, line_items: str = None,
+                     due_date: str = None) -> Dict:
+    import uuid
+    stmt_number = f"STMT-{uuid.uuid4().hex[:8].upper()}"
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO statements (patient_id, statement_number, total_amount, amount_due, line_items, due_date)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (patient_id, stmt_number, total_amount, total_amount, line_items, due_date))
+        return {"id": cursor.lastrowid, "statement_number": stmt_number}
+
+
+def get_patient_statements(patient_id: int, limit: int = 50) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT s.*, p.name as patient_name
+            FROM statements s
+            JOIN patients p ON s.patient_id = p.id
+            WHERE s.patient_id = ?
+            ORDER BY s.created_at DESC LIMIT ?
+        """, (patient_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_all_statements(status: str = None, limit: int = 100) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT s.*, p.name as patient_name
+            FROM statements s
+            JOIN patients p ON s.patient_id = p.id
+        """
+        params = []
+        if status:
+            query += " WHERE s.status = ?"
+            params.append(status)
+        query += " ORDER BY s.created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
 

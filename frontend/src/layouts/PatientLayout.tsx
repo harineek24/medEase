@@ -7,12 +7,15 @@ import {
   Bell,
   LogOut,
   CalendarPlus,
+  Receipt,
+  CreditCard,
+  ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { PatientApp } from '@/App'
 
-type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'appointments'
+type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'appointments' | 'mystatements' | 'mypayments' | 'myinsurance'
 
 export default function PatientLayout() {
   const [currentView, setCurrentView] = useState<PatientView>('upload')
@@ -25,6 +28,9 @@ export default function PatientLayout() {
     { view: 'consult',   icon: Mic,              label: 'Live Consult' },
     { view: 'updates',      icon: Bell,             label: 'Updates' },
     { view: 'appointments', icon: CalendarPlus,     label: 'Book Appt' },
+    { view: 'mystatements', icon: Receipt,          label: 'Statements' },
+    { view: 'mypayments',   icon: CreditCard,       label: 'Pay Bill' },
+    { view: 'myinsurance',  icon: ShieldCheck,      label: 'Insurance' },
   ]
 
   return (
