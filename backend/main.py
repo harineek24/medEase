@@ -1781,6 +1781,44 @@ class CreateBillingRequest(BaseModel):
     status: str = "pending"
 
 
+class CreateClaimRequest(BaseModel):
+    patient_id: int
+    provider_id: Optional[int] = None
+    insurance_id: Optional[int] = None
+    claim_type: str = "professional"
+    diagnosis_codes: Optional[str] = None
+    place_of_service: str = "11"
+    date_of_service: Optional[str] = None
+    notes: Optional[str] = None
+    lines: Optional[List[Dict[str, Any]]] = []
+
+class UpdateClaimStatusRequest(BaseModel):
+    status: str
+    details: Optional[str] = None
+
+class RecordPaymentRequest(BaseModel):
+    patient_id: int
+    amount: float
+    payment_method: str = "credit_card"
+    payment_type: str = "patient"
+    claim_id: Optional[int] = None
+    billing_id: Optional[int] = None
+    reference_number: Optional[str] = None
+    notes: Optional[str] = None
+
+class VerifyEligibilityRequest(BaseModel):
+    patient_id: int
+    insurance_id: Optional[int] = None
+    payer_name: str
+    policy_number: Optional[str] = None
+    date_of_service: Optional[str] = None
+
+class CreateStatementRequest(BaseModel):
+    patient_id: int
+    total_amount: float
+    line_items: Optional[str] = None
+    due_date: Optional[str] = None
+
 class CreateDoctorNoteRequest(BaseModel):
     doctor_id: int
     patient_id: int
@@ -2885,6 +2923,336 @@ async def get_clinics():
     try:
         clinics = db.get_all_clinics()
         return JSONResponse(content={"clinics": clinics, "count": len(clinics)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Advanced Billing Endpoints - Claims, Clearinghouse, Eligibility, Payments
+# =============================================================================
+
+from services.claims_edit_engine import edit_engine
+from services.eligibility_service import eligibility_service
+from services.coding_service import coding_service
+
+# --- Claims ---
+
+@app.get("/api/clinicadmin/claims")
+async def get_claims(status: Optional[str] = None, limit: int = 100):
+    """Get all claims with optional status filter."""
+    try:
+        claims = db.get_all_claims(status=status, limit=limit)
+        return JSONResponse(content={"claims": claims, "count": len(claims)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/claims/summary")
+async def get_claims_summary():
+    """Get claims summary statistics."""
+    try:
+        summary = db.get_claims_summary()
+        return JSONResponse(content=summary)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/claims/{claim_id}")
+async def get_claim_detail(claim_id: int):
+    """Get a single claim with lines and events."""
+    try:
+        claim = db.get_claim(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        return JSONResponse(content=claim)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/clinicadmin/claims")
+async def create_claim(request: CreateClaimRequest):
+    """Create a new CMS-1500 claim."""
+    try:
+        result = db.create_claim(
+            patient_id=request.patient_id,
+            provider_id=request.provider_id,
+            insurance_id=request.insurance_id,
+            claim_type=request.claim_type,
+            diagnosis_codes=request.diagnosis_codes,
+            place_of_service=request.place_of_service,
+            date_of_service=request.date_of_service,
+            notes=request.notes
+        )
+        # Add line items if provided
+        if request.lines:
+            for line in request.lines:
+                db.add_claim_line(
+                    claim_id=result["id"],
+                    cpt_code=line.get("cpt_code", ""),
+                    charge_amount=line.get("charge_amount", 0),
+                    cpt_description=line.get("cpt_description"),
+                    icd_codes=line.get("icd_codes"),
+                    modifier=line.get("modifier"),
+                    units=line.get("units", 1)
+                )
+        return JSONResponse(content={"success": True, **result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/clinicadmin/claims/{claim_id}/status")
+async def update_claim_status(claim_id: int, request: UpdateClaimStatusRequest):
+    """Update a claim's status (revenue cycle)."""
+    try:
+        valid = ["draft", "validated", "submitted", "acknowledged", "adjudicated", "paid", "denied", "appealed"]
+        if request.status not in valid:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid)}")
+        success = db.update_claim_status(claim_id, request.status, request.details)
+        if not success:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        return JSONResponse(content={"success": True, "message": f"Claim status updated to {request.status}"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Clearinghouse / Scrubbing ---
+
+@app.post("/api/clinicadmin/claims/{claim_id}/scrub")
+async def scrub_claim(claim_id: int):
+    """Run claims edit engine on a claim before submission."""
+    try:
+        claim = db.get_claim(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        results = edit_engine.scrub_claim(claim)
+        # Store scrub results on the claim
+        import json
+        with db.get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE claims SET scrub_results = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (json.dumps(results), claim_id))
+        if results["passed"]:
+            db.update_claim_status(claim_id, "validated", "Passed all edit checks")
+        return JSONResponse(content=results)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/clinicadmin/claims/{claim_id}/submit")
+async def submit_claim(claim_id: int):
+    """Submit a validated claim to the clearinghouse (simulated)."""
+    try:
+        claim = db.get_claim(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        if claim["status"] not in ("validated", "draft"):
+            raise HTTPException(status_code=400, detail=f"Claim must be validated before submission (current: {claim['status']})")
+        # Auto-scrub if still draft
+        if claim["status"] == "draft":
+            results = edit_engine.scrub_claim(claim)
+            if not results["passed"]:
+                return JSONResponse(content={
+                    "success": False,
+                    "message": "Claim failed scrubbing",
+                    "scrub_results": results
+                }, status_code=400)
+        db.update_claim_status(claim_id, "submitted", "Submitted to clearinghouse")
+        return JSONResponse(content={"success": True, "message": "Claim submitted to clearinghouse"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Eligibility Verification ---
+
+@app.post("/api/clinicadmin/eligibility/verify")
+async def verify_eligibility(request: VerifyEligibilityRequest):
+    """Run real-time eligibility verification."""
+    try:
+        patient = None
+        with db.get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM patients WHERE id = ?", (request.patient_id,))
+            row = cursor.fetchone()
+            if row:
+                patient = row['name']
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        result = eligibility_service.verify_eligibility(
+            patient_name=patient,
+            payer_name=request.payer_name,
+            policy_number=request.policy_number,
+            date_of_service=request.date_of_service
+        )
+        # Save the check
+        db.create_eligibility_check(
+            patient_id=request.patient_id,
+            insurance_id=request.insurance_id,
+            payer_name=request.payer_name,
+            result=result
+        )
+        return JSONResponse(content=result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/eligibility/history")
+async def get_eligibility_history(patient_id: Optional[int] = None, limit: int = 50):
+    """Get eligibility check history."""
+    try:
+        history = db.get_eligibility_history(patient_id=patient_id, limit=limit)
+        return JSONResponse(content={"checks": history, "count": len(history)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Payments ---
+
+@app.post("/api/clinicadmin/payments")
+async def record_payment(request: RecordPaymentRequest):
+    """Record a payment."""
+    try:
+        payment_id = db.record_payment(
+            patient_id=request.patient_id,
+            amount=request.amount,
+            payment_method=request.payment_method,
+            payment_type=request.payment_type,
+            claim_id=request.claim_id,
+            billing_id=request.billing_id,
+            reference_number=request.reference_number,
+            notes=request.notes
+        )
+        return JSONResponse(content={"success": True, "payment_id": payment_id})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/payments")
+async def get_payments(patient_id: Optional[int] = None, limit: int = 100):
+    """Get payment history."""
+    try:
+        payments = db.get_payments(patient_id=patient_id, limit=limit)
+        return JSONResponse(content={"payments": payments, "count": len(payments)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/payments/summary")
+async def get_payment_summary():
+    """Get payment summary statistics."""
+    try:
+        summary = db.get_payment_summary()
+        return JSONResponse(content=summary)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Statements ---
+
+@app.post("/api/clinicadmin/statements")
+async def create_statement(request: CreateStatementRequest):
+    """Create a patient statement."""
+    try:
+        result = db.create_statement(
+            patient_id=request.patient_id,
+            total_amount=request.total_amount,
+            line_items=request.line_items,
+            due_date=request.due_date
+        )
+        return JSONResponse(content={"success": True, **result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/statements")
+async def get_statements(status: Optional[str] = None, limit: int = 100):
+    """Get all statements."""
+    try:
+        statements = db.get_all_statements(status=status, limit=limit)
+        return JSONResponse(content={"statements": statements, "count": len(statements)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/statements/patient/{patient_id}")
+async def get_patient_statements(patient_id: int, limit: int = 50):
+    """Get statements for a specific patient."""
+    try:
+        statements = db.get_patient_statements(patient_id=patient_id, limit=limit)
+        return JSONResponse(content={"statements": statements, "count": len(statements)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Code Lookup ---
+
+@app.get("/api/codes/icd10")
+async def search_icd10(q: str = "", limit: int = 20):
+    """Search ICD-10 diagnosis codes."""
+    return {"results": coding_service.search_icd10(q, limit)}
+
+
+@app.get("/api/codes/cpt")
+async def search_cpt(q: str = "", limit: int = 20):
+    """Search CPT procedure codes."""
+    return {"results": coding_service.search_cpt(q, limit)}
+
+
+# --- Patient Portal Billing ---
+
+@app.get("/api/portal/patient/{patient_id}/billing")
+async def portal_patient_billing(patient_id: int):
+    """Get patient billing records (portal view)."""
+    try:
+        records = db.get_patient_billing(patient_id)
+        return JSONResponse(content={"billing": records, "count": len(records)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portal/patient/{patient_id}/statements")
+async def portal_patient_statements(patient_id: int):
+    """Get patient statements (portal view)."""
+    try:
+        statements = db.get_patient_statements(patient_id)
+        return JSONResponse(content={"statements": statements, "count": len(statements)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portal/patient/{patient_id}/payments")
+async def portal_patient_payments(patient_id: int):
+    """Get patient payment history (portal view)."""
+    try:
+        payments = db.get_payments(patient_id=patient_id)
+        return JSONResponse(content={"payments": payments, "count": len(payments)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/portal/patient/{patient_id}/payments")
+async def portal_make_payment(patient_id: int, request: RecordPaymentRequest):
+    """Patient makes a payment (portal)."""
+    try:
+        payment_id = db.record_payment(
+            patient_id=patient_id,
+            amount=request.amount,
+            payment_method=request.payment_method,
+            payment_type="patient",
+            billing_id=request.billing_id,
+            notes=request.notes
+        )
+        return JSONResponse(content={"success": True, "payment_id": payment_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

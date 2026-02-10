@@ -4,13 +4,26 @@ import {
   LogOut,
   Users,
   Stethoscope,
+  DollarSign,
+  FileText,
+  ClipboardCheck,
+  CreditCard,
+  Receipt,
+  ShieldPlus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 
 const navItems = [
-  { to: '/clinicadmin/patients',     icon: Users,           label: 'Patients',       end: false },
-  { to: '/clinicadmin/doctors',      icon: Stethoscope,     label: 'Doctors',        end: false },
+  { to: '/clinicadmin/patients',       icon: Users,           label: 'Patients',        end: false },
+  { to: '/clinicadmin/doctors',        icon: Stethoscope,     label: 'Doctors',         end: false },
+  { to: '/clinicadmin/billing',        icon: DollarSign,      label: 'Billing',         end: false },
+  { to: '/clinicadmin/claims',         icon: FileText,        label: 'Claims',          end: false },
+  { to: '/clinicadmin/clearinghouse',  icon: ClipboardCheck,  label: 'Clearinghouse',   end: false },
+  { to: '/clinicadmin/eligibility',    icon: ShieldPlus,      label: 'Eligibility',     end: false },
+  { to: '/clinicadmin/payments',       icon: CreditCard,      label: 'Payments',        end: false },
+  { to: '/clinicadmin/statements',     icon: Receipt,         label: 'Statements',      end: false },
+  { to: '/clinicadmin/insurance',      icon: ShieldCheck,     label: 'Insurance',       end: false },
 ]
 
 export default function ClinicAdminLayout() {

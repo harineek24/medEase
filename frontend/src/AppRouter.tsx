@@ -11,6 +11,14 @@ import DoctorFeed from '@/components/doctor/DoctorFeed'
 import DoctorReplyPage from '@/components/doctor/DoctorReplyPage'
 import AdminPatientRegistration from '@/components/clinicadmin/AdminPatientRegistration'
 import AdminDoctorManagement from '@/components/clinicadmin/AdminDoctorManagement'
+import BillingDashboard from '@/components/clinicadmin/BillingDashboard'
+import InsuranceDashboard from '@/components/clinicadmin/InsuranceDashboard'
+import ClaimsDashboard from '@/components/clinicadmin/ClaimsDashboard'
+import ClaimDetail from '@/components/clinicadmin/ClaimDetail'
+import ClearinghousePage from '@/components/clinicadmin/ClearinghousePage'
+import EligibilityPage from '@/components/clinicadmin/EligibilityPage'
+import PaymentsDashboard from '@/components/clinicadmin/PaymentsDashboard'
+import StatementsDashboard from '@/components/clinicadmin/StatementsDashboard'
 import type { ReactNode } from 'react'
 
 /* ------------------------------------------------------------------ */
@@ -59,6 +67,14 @@ export default function AppRouter() {
         <Route index element={<Navigate to="patients" replace />} />
         <Route path="patients" element={<AdminPatientRegistration />} />
         <Route path="doctors" element={<AdminDoctorManagement />} />
+        <Route path="billing" element={<BillingDashboard />} />
+        <Route path="claims" element={<ClaimsDashboard />} />
+        <Route path="claims/:id" element={<ClaimDetail />} />
+        <Route path="clearinghouse" element={<ClearinghousePage />} />
+        <Route path="eligibility" element={<EligibilityPage />} />
+        <Route path="payments" element={<PaymentsDashboard />} />
+        <Route path="statements" element={<StatementsDashboard />} />
+        <Route path="insurance" element={<InsuranceDashboard />} />
       </Route>
 
       {/* ---- Doctor Portal ---- */}

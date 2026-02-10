@@ -12,6 +12,9 @@ import AppointmentBooking from './components/patient/AppointmentBooking'
 import HealthAppointmentCards from './components/patient/HealthAppointmentCards'
 import DoctorUpdatesCard from './components/patient/DoctorUpdatesCard'
 import VoiceConsult from './components/VoiceConsult'
+import PatientStatements from './components/patient/PatientStatements'
+import PatientPayments from './components/patient/PatientPayments'
+import PatientInsuranceView from './components/patient/PatientInsuranceView'
 import { HelixScene } from './components/ui/helix-scene'
 import { Ripple } from './components/ui/material-design-3-ripple'
 import BlurEffect from 'react-progressive-blur'
@@ -22,7 +25,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 type AppState = 'upload' | 'processing' | 'results'
 
 // Extended view type that includes the new patient-portal views
-export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'appointments'
+export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'appointments' | 'mystatements' | 'mypayments' | 'myinsurance'
 
 interface SummaryData {
   summary: string
@@ -751,6 +754,15 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
 
       case 'appointments':
         return <AppointmentBooking patientId={patientId ?? 1} />
+
+      case 'mystatements':
+        return <PatientStatements patientId={patientId ?? 1} />
+
+      case 'mypayments':
+        return <PatientPayments patientId={patientId ?? 1} />
+
+      case 'myinsurance':
+        return <PatientInsuranceView patientId={patientId ?? 1} />
 
       case 'upload':
       default:
