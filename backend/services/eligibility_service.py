@@ -83,7 +83,7 @@ PAYER_PROFILES = {
 }
 
 # Stedi API endpoint
-STEDI_ELIGIBILITY_URL = "https://healthcare.us.stedi.com/2024-04-01/change/medicaleligibility/v3"
+STEDI_ELIGIBILITY_URL = "https://healthcare.us.stedi.com/2024-04-01/change/medicalnetwork/eligibility/v3"
 
 
 class EligibilityService:
@@ -178,7 +178,11 @@ class EligibilityService:
         first_name = parts[0] if parts else "Unknown"
         last_name = parts[-1] if len(parts) > 1 else "Unknown"
 
-        dos = date_of_service or datetime.now().strftime("%Y-%m-%d")
+        # Stedi requires YYYYMMDD format (no dashes)
+        if date_of_service:
+            dos = date_of_service.replace("-", "")
+        else:
+            dos = datetime.now().strftime("%Y%m%d")
 
         # Build the Stedi 270 request
         payload = {
@@ -196,15 +200,13 @@ class EligibilityService:
             },
             "encounter": {
                 "serviceTypeCodes": ["30"],  # 30 = Health Benefit Plan Coverage
-                "dateRange": {
-                    "startDate": dos,
-                    "endDate": dos,
-                },
+                "beginningDateOfService": dos,
+                "endDateOfService": dos,
             },
         }
 
         headers = {
-            "Authorization": f"Key {self._api_key}",
+            "Authorization": self._api_key,
             "Content-Type": "application/json",
         }
 
