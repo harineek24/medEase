@@ -19,6 +19,8 @@ import ClearinghousePage from '@/components/clinicadmin/ClearinghousePage'
 import EligibilityPage from '@/components/clinicadmin/EligibilityPage'
 import PaymentsDashboard from '@/components/clinicadmin/PaymentsDashboard'
 import StatementsDashboard from '@/components/clinicadmin/StatementsDashboard'
+import InsuranceDiscoveryPage from '@/components/clinicadmin/InsuranceDiscoveryPage'
+import ERAPage from '@/components/clinicadmin/ERAPage'
 import type { ReactNode } from 'react'
 
 /* ------------------------------------------------------------------ */
@@ -73,6 +75,8 @@ export default function AppRouter() {
         <Route path="clearinghouse" element={<ClearinghousePage />} />
         <Route path="eligibility" element={<EligibilityPage />} />
         <Route path="payments" element={<PaymentsDashboard />} />
+        <Route path="era" element={<ERAPage />} />
+        <Route path="discovery" element={<InsuranceDiscoveryPage />} />
         <Route path="statements" element={<StatementsDashboard />} />
         <Route path="insurance" element={<InsuranceDashboard />} />
       </Route>
