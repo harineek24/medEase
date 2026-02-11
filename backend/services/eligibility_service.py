@@ -184,31 +184,37 @@ class EligibilityService:
         else:
             dos = datetime.now().strftime("%Y%m%d")
 
-        # Build the Stedi 270 request
+        # Build the Stedi 270 request – only include fields that have values
+        subscriber = {
+            "firstName": first_name,
+            "lastName": last_name,
+        }
+        if policy_number:
+            subscriber["memberId"] = policy_number
+
+        encounter: Dict = {
+            "serviceTypeCodes": ["30"],  # 30 = Health Benefit Plan Coverage
+        }
+        if dos:
+            encounter["beginningDateOfService"] = dos
+            encounter["endDateOfService"] = dos
+
         payload = {
-            "controlNumber": f"MEDEASE{int(datetime.now().timestamp())}",
             "tradingPartnerServiceId": payer_id,
             "provider": {
                 "organizationName": self._provider_org_name,
                 "npi": self._provider_npi,
             },
-            "subscriber": {
-                "memberId": policy_number or "",
-                "firstName": first_name,
-                "lastName": last_name,
-                "dateOfBirth": "",  # Would be populated from patient record in production
-            },
-            "encounter": {
-                "serviceTypeCodes": ["30"],  # 30 = Health Benefit Plan Coverage
-                "beginningDateOfService": dos,
-                "endDateOfService": dos,
-            },
+            "subscriber": subscriber,
+            "encounter": encounter,
         }
 
         headers = {
             "Authorization": self._api_key,
             "Content-Type": "application/json",
         }
+
+        log.info("Stedi request to %s: %s", payer_id, payload)
 
         resp = requests.post(
             STEDI_ELIGIBILITY_URL,
@@ -217,12 +223,15 @@ class EligibilityService:
             timeout=30,
         )
 
-        if resp.status_code == 401:
-            raise ValueError("Invalid Stedi API key")
-        if resp.status_code == 404:
-            raise ValueError(f"Payer '{payer_name}' (ID: {payer_id}) not found on Stedi")
+        # Include the response body in errors for debugging
+        if not resp.ok:
+            try:
+                error_body = resp.json()
+            except Exception:
+                error_body = resp.text
+            log.warning("Stedi API %d: %s", resp.status_code, error_body)
+            raise ValueError(f"Stedi API {resp.status_code}: {error_body}")
 
-        resp.raise_for_status()
         data = resp.json()
 
         return self._parse_stedi_response(data, payer_name)
