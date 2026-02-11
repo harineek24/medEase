@@ -86,6 +86,24 @@ PAYER_PROFILES = {
 STEDI_ELIGIBILITY_URL = "https://healthcare.us.stedi.com/2024-04-01/change/medicalnetwork/eligibility/v3"
 STEDI_PAYER_SEARCH_URL = "https://healthcare.us.stedi.com/2024-04-01/payers/search"
 
+# Known Stedi sandbox mock request — sandbox/test keys ONLY accept these exact values
+STEDI_MOCK_REQUEST = {
+    "tradingPartnerServiceId": "AHS",
+    "provider": {
+        "npi": "1999999984",
+        "organizationName": "ACME Health Services",
+    },
+    "subscriber": {
+        "dateOfBirth": "19000101",
+        "firstName": "Jane",
+        "lastName": "Doe",
+        "memberId": "123456789",
+    },
+    "encounter": {
+        "serviceTypeCodes": ["MH"],
+    },
+}
+
 
 class EligibilityService:
     """Eligibility verification via Stedi API with simulated fallback."""
@@ -155,6 +173,10 @@ class EligibilityService:
             "provider_npi": self._provider_npi,
             "provider_name": self._provider_name,
             "provider_org": self._provider_org_name,
+            "note": (
+                "Sandbox/test API keys only work with predefined mock data. "
+                "For real patient lookups, use a production API key."
+            ) if self.is_live else "Add a Stedi API key to enable live eligibility checks.",
         }
 
     def search_payers(self, query: str) -> list:
@@ -184,6 +206,42 @@ class EligibilityService:
         except Exception as exc:
             log.warning("Stedi payer search failed: %s", exc)
             return []
+
+    def test_connection(self) -> Dict:
+        """
+        Send a known-good mock request to verify the Stedi API key works.
+        Uses Stedi's predefined sandbox test case.
+        """
+        if not self._api_key:
+            return {"success": False, "error": "No API key configured"}
+
+        try:
+            resp = requests.post(
+                STEDI_ELIGIBILITY_URL,
+                json=STEDI_MOCK_REQUEST,
+                headers={
+                    "Authorization": self._api_key,
+                    "Content-Type": "application/json",
+                },
+                timeout=30,
+            )
+            if resp.ok:
+                data = resp.json()
+                is_sandbox = True  # mock request worked, so this is a sandbox/test key
+                return {
+                    "success": True,
+                    "is_sandbox": is_sandbox,
+                    "message": "API key is valid. Sandbox/test mode detected — real patient lookups require a production key.",
+                    "response_status": data.get("status"),
+                }
+            else:
+                try:
+                    err = resp.json()
+                except Exception:
+                    err = resp.text
+                return {"success": False, "error": f"Stedi returned {resp.status_code}", "details": err}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
     # Stedi live implementation
