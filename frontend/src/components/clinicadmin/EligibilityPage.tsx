@@ -10,6 +10,7 @@ import {
   X,
   Wifi,
   WifiOff,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +71,10 @@ export default function EligibilityPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState({ api_key: "", provider_npi: "", provider_name: "", provider_org: "" });
   const [savingSettings, setSavingSettings] = useState(false);
+
+  const [payerQuery, setPayerQuery] = useState("");
+  const [payerResults, setPayerResults] = useState<{ stedi_id: string; name: string; payer_id: string; aliases: string[] }[]>([]);
+  const [searchingPayers, setSearchingPayers] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -151,6 +156,20 @@ export default function EligibilityPage() {
       alert("Failed to save settings.");
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handlePayerSearch = async () => {
+    if (!payerQuery || payerQuery.length < 2) return;
+    setSearchingPayers(true);
+    try {
+      const res = await fetch(`${API}/api/clinicadmin/eligibility/payers?query=${encodeURIComponent(payerQuery)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPayerResults(data.payers || []);
+      }
+    } catch { /* ignore */ } finally {
+      setSearchingPayers(false);
     }
   };
 
@@ -370,6 +389,38 @@ export default function EligibilityPage() {
                   </button>
                 </div>
               </form>
+
+              {/* Payer Search */}
+              {isLive && (
+                <div className="mt-5 border-t border-gray-200 pt-5">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-2">Payer Directory Search</h3>
+                  <p className="text-xs text-gray-500 mb-3">Look up the correct Stedi payer ID for an insurance company.</p>
+                  <div className="flex gap-2">
+                    <input type="text" value={payerQuery}
+                      onChange={e => setPayerQuery(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && (e.preventDefault(), handlePayerSearch())}
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#45BFD3] focus:ring-2 focus:ring-[#45BFD3]/30 outline-none transition"
+                      placeholder="e.g. Blue Cross, Aetna, 60054..." />
+                    <button type="button" onClick={handlePayerSearch} disabled={searchingPayers || payerQuery.length < 2}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition disabled:opacity-50">
+                      {searchingPayers ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Search
+                    </button>
+                  </div>
+                  {payerResults.length > 0 && (
+                    <div className="mt-3 max-h-48 overflow-y-auto rounded-lg border border-gray-200">
+                      {payerResults.map(p => (
+                        <div key={p.stedi_id} className="flex items-center justify-between border-b border-gray-100 px-3 py-2 last:border-0 hover:bg-gray-50">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-gray-800 truncate">{p.name}</p>
+                            <p className="text-xs text-gray-500">ID: <span className="font-mono">{p.payer_id}</span></p>
+                          </div>
+                          <span className="ml-2 shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs font-mono text-gray-600">{p.payer_id}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
           </Fragment>
         )}
