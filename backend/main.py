@@ -3186,6 +3186,13 @@ async def search_payers(query: str = ""):
     return JSONResponse(content={"payers": results})
 
 
+@app.post("/api/clinicadmin/eligibility/test")
+async def test_eligibility_connection():
+    """Test the Stedi API connection using a known mock request."""
+    result = eligibility_service.test_connection()
+    return JSONResponse(content=result)
+
+
 # --- Payments ---
 
 @app.post("/api/clinicadmin/payments")

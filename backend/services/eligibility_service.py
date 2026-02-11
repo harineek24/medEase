@@ -86,12 +86,84 @@ PAYER_PROFILES = {
 STEDI_ELIGIBILITY_URL = "https://healthcare.us.stedi.com/2024-04-01/change/medicalnetwork/eligibility/v3"
 STEDI_PAYER_SEARCH_URL = "https://healthcare.us.stedi.com/2024-04-01/payers/search"
 
+# Stedi sandbox mock test cases — test keys ONLY accept these exact values.
+# From https://www.stedi.com/docs/healthcare/api-reference/mock-requests-eligibility-checks
+STEDI_MOCK_CASES = {
+    # Subscriber-only test cases
+    "60054": {  # Aetna
+        "tradingPartnerServiceId": "60054",
+        "provider": {"organizationName": "Provider Name", "npi": "1999999984"},
+        "subscriber": {"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "20040404", "memberId": "AETNA12345"},
+        "encounter": {"serviceTypeCodes": ["30"]},
+    },
+    "G84980": {  # BCBS of Texas (sandbox uses G84980, not 84980)
+        "tradingPartnerServiceId": "G84980",
+        "provider": {"organizationName": "Provider Name", "npi": "1999999984"},
+        "subscriber": {"firstName": "John", "lastName": "Doe", "memberId": "A2CBCBSTX123"},
+        "dependents": [{"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "20150101"}],
+        "encounter": {"serviceTypeCodes": ["30"]},
+    },
+    "62308": {  # Cigna
+        "tradingPartnerServiceId": "62308",
+        "provider": {"organizationName": "Provider Name", "npi": "1999999984"},
+        "subscriber": {"firstName": "John", "lastName": "Doe", "memberId": "CIGNAJTUxNm"},
+        "dependents": [{"firstName": "Jordan", "lastName": "Doe", "dateOfBirth": "20150920"}],
+        "encounter": {"serviceTypeCodes": ["30"]},
+    },
+    "87726": {  # UnitedHealthcare
+        "tradingPartnerServiceId": "87726",
+        "provider": {"organizationName": "Provider Name", "npi": "1999999984"},
+        "subscriber": {"firstName": "John", "lastName": "Doe", "memberId": "UHC202649"},
+        "dependents": [{"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19521121"}],
+        "encounter": {"serviceTypeCodes": ["30"]},
+    },
+    "68069": {  # Ambetter
+        "tradingPartnerServiceId": "68069",
+        "provider": {"organizationName": "Provider Name", "npi": "1999999984"},
+        "subscriber": {"firstName": "John", "lastName": "Doe", "dateOfBirth": "19940404", "memberId": "AMBETTER123"},
+        "encounter": {"serviceTypeCodes": ["30"]},
+    },
+    "040": {  # Anthem BCBS CA
+        "tradingPartnerServiceId": "040",
+        "provider": {"organizationName": "Provider Name", "npi": "1999999984"},
+        "subscriber": {"firstName": "Jane", "lastName": "Doe", "memberId": "CGMBCBSCA123"},
+        "dependents": [{"firstName": "John", "lastName": "Doe", "dateOfBirth": "19750101"}],
+        "encounter": {"serviceTypeCodes": ["30"]},
+    },
+    "OSCAR": {  # Oscar Health
+        "tradingPartnerServiceId": "OSCAR",
+        "provider": {"organizationName": "Provider Name", "npi": "1999999984"},
+        "subscriber": {"firstName": "John", "lastName": "Doe", "memberId": "OSCAR123456"},
+        "dependents": [{"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "20010101"}],
+        "encounter": {"serviceTypeCodes": ["30"]},
+    },
+    # Generic test case (for Test Connection)
+    "AHS": {
+        "tradingPartnerServiceId": "AHS",
+        "provider": {"npi": "1999999984", "organizationName": "ACME Health Services"},
+        "subscriber": {"dateOfBirth": "19000101", "firstName": "Jane", "lastName": "Doe", "memberId": "123456789"},
+        "encounter": {"serviceTypeCodes": ["MH"]},
+    },
+}
+
+# Map our payer names to sandbox mock case keys
+PAYER_TO_MOCK_KEY = {
+    "Aetna": "60054",
+    "Blue Cross": "G84980",
+    "Cigna": "62308",
+    "United Healthcare": "87726",
+    "Kaiser": None,       # No sandbox mock available
+    "Humana": None,       # No sandbox mock available
+    "Medicaid": None,     # No sandbox mock available
+}
+
 
 class EligibilityService:
     """Eligibility verification via Stedi API with simulated fallback."""
 
     def __init__(self):
         self._api_key: Optional[str] = os.getenv("STEDI_API_KEY")
+        self._is_sandbox: Optional[bool] = None  # detected on first test
         # Provider NPI is needed for real calls – configurable via env
         self._provider_npi: str = os.getenv("STEDI_PROVIDER_NPI", "1234567893")
         self._provider_name: str = os.getenv("STEDI_PROVIDER_NAME", "MedEase Clinic")
@@ -108,6 +180,7 @@ class EligibilityService:
     def set_api_key(self, key: str):
         """Allow runtime update of the Stedi API key (e.g. via admin settings)."""
         self._api_key = key if key else None
+        self._is_sandbox = None  # reset detection
 
     def set_provider_info(self, npi: str = None, name: str = None, org: str = None):
         if npi:
@@ -149,12 +222,25 @@ class EligibilityService:
 
     def get_status(self) -> Dict:
         """Return current configuration status (safe to expose, no secrets)."""
+        is_sandbox = self._is_sandbox
+        if self.is_live and is_sandbox is True:
+            note = ("Sandbox mode — using Stedi mock test data. "
+                    "Supported payers: Aetna, Blue Cross (TX), Cigna, United Healthcare. "
+                    "For real patient lookups, switch to a production API key.")
+        elif self.is_live and is_sandbox is False:
+            note = "Production mode — real-time eligibility checks enabled."
+        elif self.is_live:
+            note = "API key set. Click 'Test Connection' in Settings to detect sandbox vs production mode."
+        else:
+            note = "Add a Stedi API key to enable live eligibility checks."
         return {
             "mode": "live" if self.is_live else "simulated",
+            "is_sandbox": is_sandbox,
             "api_key_set": bool(self._api_key),
             "provider_npi": self._provider_npi,
             "provider_name": self._provider_name,
             "provider_org": self._provider_org_name,
+            "note": note,
         }
 
     def search_payers(self, query: str) -> list:
@@ -185,6 +271,52 @@ class EligibilityService:
             log.warning("Stedi payer search failed: %s", exc)
             return []
 
+    def test_connection(self) -> Dict:
+        """
+        Send a known-good mock request to verify the Stedi API key works.
+        Uses Stedi's predefined sandbox test case.  Also detects sandbox vs production.
+        """
+        if not self._api_key:
+            return {"success": False, "error": "No API key configured"}
+
+        try:
+            mock_case = STEDI_MOCK_CASES["AHS"]
+            resp = requests.post(
+                STEDI_ELIGIBILITY_URL,
+                json=mock_case,
+                headers={
+                    "Authorization": self._api_key,
+                    "Content-Type": "application/json",
+                },
+                timeout=30,
+            )
+            if resp.ok:
+                data = resp.json()
+                # Mock request succeeded → this is a sandbox/test key
+                self._is_sandbox = True
+                return {
+                    "success": True,
+                    "is_sandbox": True,
+                    "message": "API key is valid (sandbox/test mode). Use mock payers like Aetna, BCBS TX, Cigna, or UHC to test.",
+                    "response_status": data.get("status"),
+                }
+            elif resp.status_code == 400:
+                # Mock request got 400 → likely a production key (mock cases rejected)
+                self._is_sandbox = False
+                return {
+                    "success": True,
+                    "is_sandbox": False,
+                    "message": "API key is valid (production mode). Real patient eligibility checks are enabled.",
+                }
+            else:
+                try:
+                    err = resp.json()
+                except Exception:
+                    err = resp.text
+                return {"success": False, "error": f"Stedi returned {resp.status_code}", "details": err}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Stedi live implementation
     # ------------------------------------------------------------------
@@ -198,52 +330,63 @@ class EligibilityService:
     ) -> Dict:
         """Call Stedi Healthcare Eligibility API (270/271)."""
 
-        # Resolve payer ID
-        profile = PAYER_PROFILES.get(payer_name, {})
-        payer_id = profile.get("stedi_payer_id", payer_name)
+        # Check if we should use a sandbox mock case
+        mock_key = PAYER_TO_MOCK_KEY.get(payer_name)
+        use_sandbox = self._is_sandbox is True or (self._is_sandbox is None)
 
-        # Split patient name
-        parts = patient_name.strip().split()
-        first_name = parts[0] if parts else "Unknown"
-        last_name = parts[-1] if len(parts) > 1 else "Unknown"
-
-        # Stedi requires YYYYMMDD format (no dashes)
-        if date_of_service:
-            dos = date_of_service.replace("-", "")
+        if use_sandbox and mock_key and mock_key in STEDI_MOCK_CASES:
+            # Use the predefined mock case for this payer
+            payload = STEDI_MOCK_CASES[mock_key]
+            log.info("Stedi sandbox request for %s using mock case %s", payer_name, mock_key)
+        elif use_sandbox and mock_key is None:
+            # No mock case for this payer in sandbox
+            raise ValueError(
+                f"No sandbox test case for '{payer_name}'. "
+                f"In sandbox mode, try: Aetna, Blue Cross, Cigna, or United Healthcare."
+            )
         else:
-            dos = datetime.now().strftime("%Y%m%d")
+            # Production mode — build real request
+            profile = PAYER_PROFILES.get(payer_name, {})
+            payer_id = profile.get("stedi_payer_id", payer_name)
 
-        # Build the Stedi 270 request – only include fields that have values
-        subscriber = {
-            "firstName": first_name,
-            "lastName": last_name,
-        }
-        if policy_number:
-            subscriber["memberId"] = policy_number
+            parts = patient_name.strip().split()
+            first_name = parts[0] if parts else "Unknown"
+            last_name = parts[-1] if len(parts) > 1 else "Unknown"
 
-        encounter: Dict = {
-            "serviceTypeCodes": ["30"],  # 30 = Health Benefit Plan Coverage
-        }
-        if dos:
-            encounter["beginningDateOfService"] = dos
-            encounter["endDateOfService"] = dos
+            if date_of_service:
+                dos = date_of_service.replace("-", "")
+            else:
+                dos = datetime.now().strftime("%Y%m%d")
 
-        payload = {
-            "tradingPartnerServiceId": payer_id,
-            "provider": {
-                "organizationName": self._provider_org_name,
-                "npi": self._provider_npi,
-            },
-            "subscriber": subscriber,
-            "encounter": encounter,
-        }
+            subscriber = {
+                "firstName": first_name,
+                "lastName": last_name,
+            }
+            if policy_number:
+                subscriber["memberId"] = policy_number
+
+            encounter: Dict = {
+                "serviceTypeCodes": ["30"],
+            }
+            if dos:
+                encounter["beginningDateOfService"] = dos
+                encounter["endDateOfService"] = dos
+
+            payload = {
+                "tradingPartnerServiceId": payer_id,
+                "provider": {
+                    "organizationName": self._provider_org_name,
+                    "npi": self._provider_npi,
+                },
+                "subscriber": subscriber,
+                "encounter": encounter,
+            }
+            log.info("Stedi production request to %s: %s", payer_id, payload)
 
         headers = {
             "Authorization": self._api_key,
             "Content-Type": "application/json",
         }
-
-        log.info("Stedi request to %s: %s", payer_id, payload)
 
         resp = requests.post(
             STEDI_ELIGIBILITY_URL,
@@ -259,11 +402,25 @@ class EligibilityService:
             except Exception:
                 error_body = resp.text
             log.warning("Stedi API %d: %s", resp.status_code, error_body)
+
+            # If this was a sandbox attempt that failed, auto-detect sandbox mode
+            errors = error_body if isinstance(error_body, dict) else {}
+            err_list = errors.get("errors", [])
+            if err_list and "test case" in str(err_list).lower():
+                self._is_sandbox = True
+
             raise ValueError(f"Stedi API {resp.status_code}: {error_body}")
 
         data = resp.json()
 
-        return self._parse_stedi_response(data, payer_name)
+        # If sandbox mock case worked, mark as sandbox
+        if mock_key and mock_key in STEDI_MOCK_CASES:
+            self._is_sandbox = True
+
+        result = self._parse_stedi_response(data, payer_name)
+        if self._is_sandbox:
+            result["_source"] = "stedi_sandbox"
+        return result
 
     def _parse_stedi_response(self, data: Dict, payer_name: str) -> Dict:
         """

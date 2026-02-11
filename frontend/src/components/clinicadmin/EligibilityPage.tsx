@@ -52,10 +52,12 @@ interface HistoryRecord {
 
 interface ServiceStatus {
   mode: string;
+  is_sandbox?: boolean | null;
   api_key_set: boolean;
   provider_npi: string;
   provider_name: string;
   provider_org: string;
+  note?: string;
 }
 
 export default function EligibilityPage() {
@@ -75,6 +77,9 @@ export default function EligibilityPage() {
   const [payerQuery, setPayerQuery] = useState("");
   const [payerResults, setPayerResults] = useState<{ stedi_id: string; name: string; payer_id: string; aliases: string[] }[]>([]);
   const [searchingPayers, setSearchingPayers] = useState(false);
+
+  const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string; is_sandbox?: boolean } | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -173,6 +178,18 @@ export default function EligibilityPage() {
     }
   };
 
+  const handleTestConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(`${API}/api/clinicadmin/eligibility/test`, { method: "POST" });
+      if (res.ok) setTestResult(await res.json());
+      else setTestResult({ success: false, error: "Request failed" });
+    } catch { setTestResult({ success: false, error: "Network error" }); } finally {
+      setTesting(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex h-96 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[#45BFD3]" /></div>;
   }
@@ -187,10 +204,11 @@ export default function EligibilityPage() {
           {/* Mode badge */}
           <span className={cn(
             "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
-            isLive ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+            !isLive ? "bg-amber-100 text-amber-700" :
+            status?.is_sandbox ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
           )}>
             {isLive ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-            {isLive ? "Live (Stedi API)" : "Simulated"}
+            {!isLive ? "Simulated" : status?.is_sandbox ? "Sandbox (Stedi)" : "Live (Stedi)"}
           </span>
           <button onClick={() => setShowSettings(true)}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">
@@ -199,11 +217,15 @@ export default function EligibilityPage() {
         </div>
       </div>
 
-      {/* Info banner when simulated */}
-      {!isLive && (
+      {/* Info banner */}
+      {!isLive ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Running in <strong>simulated mode</strong>. To connect to real payer systems, click <strong>Settings</strong> and enter your Stedi API key.
           <a href="https://www.stedi.com" target="_blank" rel="noopener noreferrer" className="ml-1 underline hover:text-amber-900">Get a free key</a>
+        </div>
+      ) : status?.note && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          {status.note}
         </div>
       )}
 
@@ -263,10 +285,12 @@ export default function EligibilityPage() {
               <span className={cn(
                 "rounded-full px-2.5 py-0.5 text-xs font-medium",
                 result._source === "stedi_live" ? "bg-green-100 text-green-700" :
+                result._source === "stedi_sandbox" ? "bg-blue-100 text-blue-700" :
                 result._source === "simulated_fallback" ? "bg-orange-100 text-orange-700" :
                 "bg-gray-100 text-gray-600"
               )}>
                 {result._source === "stedi_live" ? "Live Data" :
+                 result._source === "stedi_sandbox" ? "Sandbox Data" :
                  result._source === "simulated_fallback" ? "Fallback (API error)" :
                  "Simulated"}
               </span>
@@ -389,6 +413,39 @@ export default function EligibilityPage() {
                   </button>
                 </div>
               </form>
+
+              {/* Test Connection */}
+              {isLive && (
+                <div className="mt-4 border-t border-gray-200 pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-800">Test Connection</h3>
+                      <p className="text-xs text-gray-500">Send a mock request to verify your API key works.</p>
+                    </div>
+                    <button type="button" onClick={handleTestConnection} disabled={testing}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition disabled:opacity-50">
+                      {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />} Test
+                    </button>
+                  </div>
+                  {testResult && (
+                    <div className={cn(
+                      "mt-3 rounded-lg border px-3 py-2 text-sm",
+                      testResult.success ? "border-green-200 bg-green-50 text-green-700" : "border-red-200 bg-red-50 text-red-700"
+                    )}>
+                      {testResult.success ? (
+                        <>
+                          <p className="font-medium">Connection successful</p>
+                          {testResult.is_sandbox && (
+                            <p className="mt-1 text-xs">Sandbox/test key detected. Real patient lookups require a <strong>production</strong> API key. Eligibility checks with real patient data will use simulated fallback until you switch to a production key.</p>
+                          )}
+                        </>
+                      ) : (
+                        <p>{testResult.error}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Payer Search */}
               {isLive && (
