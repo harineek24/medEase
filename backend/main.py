@@ -3177,6 +3177,15 @@ async def update_eligibility_settings(req: EligibilitySettingsRequest):
     return JSONResponse(content=eligibility_service.get_status())
 
 
+@app.get("/api/clinicadmin/eligibility/payers")
+async def search_payers(query: str = ""):
+    """Search Stedi's payer directory by name or ID."""
+    if not query or len(query) < 2:
+        return JSONResponse(content={"payers": []})
+    results = eligibility_service.search_payers(query)
+    return JSONResponse(content={"payers": results})
+
+
 # --- Payments ---
 
 @app.post("/api/clinicadmin/payments")

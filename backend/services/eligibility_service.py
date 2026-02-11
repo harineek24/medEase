@@ -38,7 +38,7 @@ PAYER_PROFILES = {
         "deductible_range": (500, 5000),
         "coinsurance": [80, 70, 60],
         "oop_max_range": (5000, 10000),
-        "stedi_payer_id": "BCBS1",
+        "stedi_payer_id": "84980",  # BCBS of Texas – BCBS is regional, change to your state's ID
     },
     "Cigna": {
         "plan_names": ["Cigna Connect", "Cigna Open Access Plus", "Cigna PPO"],
@@ -78,12 +78,13 @@ PAYER_PROFILES = {
         "deductible_range": (0, 0),
         "coinsurance": [100],
         "oop_max_range": (0, 0),
-        "stedi_payer_id": "CAIDM",
+        "stedi_payer_id": "CMS",  # Federal CMS/HETS for Medicare & Medicaid
     },
 }
 
-# Stedi API endpoint
+# Stedi API endpoints
 STEDI_ELIGIBILITY_URL = "https://healthcare.us.stedi.com/2024-04-01/change/medicalnetwork/eligibility/v3"
+STEDI_PAYER_SEARCH_URL = "https://healthcare.us.stedi.com/2024-04-01/payers/search"
 
 
 class EligibilityService:
@@ -155,6 +156,34 @@ class EligibilityService:
             "provider_name": self._provider_name,
             "provider_org": self._provider_org_name,
         }
+
+    def search_payers(self, query: str) -> list:
+        """Search Stedi's payer directory. Requires an API key."""
+        if not self._api_key:
+            return []
+        try:
+            resp = requests.get(
+                STEDI_PAYER_SEARCH_URL,
+                params={"query": query},
+                headers={"Authorization": self._api_key},
+                timeout=15,
+            )
+            if not resp.ok:
+                log.warning("Stedi payer search %d: %s", resp.status_code, resp.text[:200])
+                return []
+            data = resp.json()
+            results = []
+            for p in data.get("payers", []):
+                results.append({
+                    "stedi_id": p.get("stediId", ""),
+                    "name": p.get("payerName", ""),
+                    "payer_id": p.get("primaryPayerId", ""),
+                    "aliases": p.get("aliases", [])[:5],
+                })
+            return results
+        except Exception as exc:
+            log.warning("Stedi payer search failed: %s", exc)
+            return []
 
     # ------------------------------------------------------------------
     # Stedi live implementation
