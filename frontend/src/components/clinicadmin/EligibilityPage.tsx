@@ -52,6 +52,7 @@ interface HistoryRecord {
 
 interface ServiceStatus {
   mode: string;
+  is_sandbox?: boolean | null;
   api_key_set: boolean;
   provider_npi: string;
   provider_name: string;
@@ -203,10 +204,11 @@ export default function EligibilityPage() {
           {/* Mode badge */}
           <span className={cn(
             "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
-            isLive ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+            !isLive ? "bg-amber-100 text-amber-700" :
+            status?.is_sandbox ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
           )}>
             {isLive ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-            {isLive ? "Live (Stedi API)" : "Simulated"}
+            {!isLive ? "Simulated" : status?.is_sandbox ? "Sandbox (Stedi)" : "Live (Stedi)"}
           </span>
           <button onClick={() => setShowSettings(true)}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">
@@ -283,10 +285,12 @@ export default function EligibilityPage() {
               <span className={cn(
                 "rounded-full px-2.5 py-0.5 text-xs font-medium",
                 result._source === "stedi_live" ? "bg-green-100 text-green-700" :
+                result._source === "stedi_sandbox" ? "bg-blue-100 text-blue-700" :
                 result._source === "simulated_fallback" ? "bg-orange-100 text-orange-700" :
                 "bg-gray-100 text-gray-600"
               )}>
                 {result._source === "stedi_live" ? "Live Data" :
+                 result._source === "stedi_sandbox" ? "Sandbox Data" :
                  result._source === "simulated_fallback" ? "Fallback (API error)" :
                  "Simulated"}
               </span>
