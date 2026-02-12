@@ -23,6 +23,17 @@ const currency = (v: number) =>
 
 interface PatientOption { id: number; name: string; }
 
+interface BenefitBreakdown {
+  copay: number | null;
+  deductible: number | null;
+  deductible_met: number | null;
+  deductible_remaining: number | null;
+  coinsurance: number | null;
+  oop_max: number | null;
+  oop_met: number | null;
+  oop_remaining: number | null;
+}
+
 interface EligibilityResult {
   is_eligible: boolean;
   coverage_type: string | null;
@@ -39,6 +50,17 @@ interface EligibilityResult {
   checked_at: string;
   _source?: string;
   _error?: string;
+  subscriber?: {
+    member_id?: string;
+    group_number?: string;
+    group_name?: string;
+  };
+  in_network?: BenefitBreakdown;
+  out_of_network?: BenefitBreakdown;
+  service_copays?: { service: string; amount: number; network: string }[];
+  auth_required?: string[];
+  payer_notes?: string[];
+  visit_limits?: { service: string; limit: string }[];
 }
 
 interface HistoryRecord {
@@ -302,17 +324,72 @@ export default function EligibilityPage() {
             </div>
           )}
           {result.is_eligible && (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              <InfoItem label="Plan" value={result.plan_name || "-"} />
-              <InfoItem label="Coverage" value={result.coverage_type || "-"} />
-              <InfoItem label="Copay" value={result.copay != null ? currency(result.copay) : "-"} />
-              <InfoItem label="Deductible" value={result.deductible != null ? currency(result.deductible) : "-"} />
-              <InfoItem label="Deductible Met" value={result.deductible_met != null ? currency(result.deductible_met) : "-"} />
-              <InfoItem label="Coinsurance" value={result.coinsurance_percent != null ? `${result.coinsurance_percent}%` : "-"} />
-              <InfoItem label="OOP Max" value={result.out_of_pocket_max != null ? currency(result.out_of_pocket_max) : "-"} />
-              <InfoItem label="OOP Met" value={result.out_of_pocket_met != null ? currency(result.out_of_pocket_met) : "-"} />
-              <InfoItem label="Effective" value={result.effective_date || "-"} />
-              <InfoItem label="Terminates" value={result.termination_date || "-"} />
+            <div className="space-y-5">
+              {/* Plan & subscriber info */}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                <InfoItem label="Plan" value={result.plan_name || "-"} />
+                <InfoItem label="Coverage" value={result.coverage_type || "-"} />
+                <InfoItem label="Effective" value={result.effective_date || "-"} />
+                <InfoItem label="Terminates" value={result.termination_date || "-"} />
+                {result.subscriber?.member_id && <InfoItem label="Member ID" value={result.subscriber.member_id} />}
+                {result.subscriber?.group_number && <InfoItem label="Group #" value={result.subscriber.group_number} />}
+                {result.subscriber?.group_name && <InfoItem label="Group Name" value={result.subscriber.group_name} />}
+              </div>
+
+              {/* In-Network / Out-of-Network breakdown */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <BenefitCard title="In-Network" data={result.in_network} fallback={result} />
+                {hasData(result.out_of_network) && (
+                  <BenefitCard title="Out-of-Network" data={result.out_of_network} />
+                )}
+              </div>
+
+              {/* Per-service copays */}
+              {result.service_copays && result.service_copays.length > 0 && (
+                <div>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Service Copays</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {result.service_copays.map((sc, i) => (
+                      <span key={i} className="rounded-full bg-white border border-gray-200 px-3 py-1 text-xs text-gray-700">
+                        <span className="font-medium">{sc.service}</span>: {currency(sc.amount)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Prior auth required */}
+              {result.auth_required && result.auth_required.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+                  <span className="font-semibold">Prior authorization required:</span> {result.auth_required.join(", ")}
+                </div>
+              )}
+
+              {/* Visit limits */}
+              {result.visit_limits && result.visit_limits.length > 0 && (
+                <div>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Visit Limits</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {result.visit_limits.map((vl, i) => (
+                      <span key={i} className="rounded-full bg-white border border-gray-200 px-3 py-1 text-xs text-gray-700">
+                        <span className="font-medium">{vl.service}</span>: {vl.limit}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Payer notes */}
+              {result.payer_notes && result.payer_notes.length > 0 && (
+                <div>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Payer Notes</h4>
+                  <ul className="space-y-1">
+                    {result.payer_notes.map((note, i) => (
+                      <li key={i} className="text-xs text-gray-600 leading-relaxed">{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </motion.div>
@@ -491,6 +568,42 @@ function InfoItem({ label, value }: { label: string; value: string }) {
     <div>
       <dt className="text-xs font-medium uppercase tracking-wider text-gray-500">{label}</dt>
       <dd className="mt-0.5 text-sm font-semibold text-gray-800">{value}</dd>
+    </div>
+  );
+}
+
+function hasData(b?: BenefitBreakdown | null): boolean {
+  if (!b) return false;
+  return [b.copay, b.deductible, b.coinsurance, b.oop_max].some(v => v != null);
+}
+
+function BenefitCard({ title, data, fallback }: { title: string; data?: BenefitBreakdown | null; fallback?: EligibilityResult }) {
+  const c = (v: number | null | undefined) => v != null ? currency(v) : "-";
+  const pct = (v: number | null | undefined) => v != null ? `${v}%` : "-";
+
+  // Use in_network data if present, fallback to top-level flat fields
+  const copay = data?.copay ?? fallback?.copay ?? null;
+  const deductible = data?.deductible ?? fallback?.deductible ?? null;
+  const deductibleMet = data?.deductible_met ?? fallback?.deductible_met ?? null;
+  const deductibleRemaining = data?.deductible_remaining ?? null;
+  const coinsurance = data?.coinsurance ?? fallback?.coinsurance_percent ?? null;
+  const oopMax = data?.oop_max ?? fallback?.out_of_pocket_max ?? null;
+  const oopMet = data?.oop_met ?? fallback?.out_of_pocket_met ?? null;
+  const oopRemaining = data?.oop_remaining ?? null;
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{title}</h4>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <InfoItem label="Copay" value={c(copay)} />
+        <InfoItem label="Coinsurance" value={pct(coinsurance)} />
+        <InfoItem label="Deductible" value={c(deductible)} />
+        <InfoItem label="Deductible Met" value={c(deductibleMet)} />
+        {deductibleRemaining != null && <InfoItem label="Deductible Remaining" value={c(deductibleRemaining)} />}
+        <InfoItem label="OOP Max" value={c(oopMax)} />
+        <InfoItem label="OOP Met" value={c(oopMet)} />
+        {oopRemaining != null && <InfoItem label="OOP Remaining" value={c(oopRemaining)} />}
+      </div>
     </div>
   );
 }

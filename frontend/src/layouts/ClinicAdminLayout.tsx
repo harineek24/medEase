@@ -10,6 +10,8 @@ import {
   CreditCard,
   Receipt,
   ShieldPlus,
+  SearchCheck,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -22,6 +24,8 @@ const navItems = [
   { to: '/clinicadmin/clearinghouse',  icon: ClipboardCheck,  label: 'Clearinghouse',   end: false },
   { to: '/clinicadmin/eligibility',    icon: ShieldPlus,      label: 'Eligibility',     end: false },
   { to: '/clinicadmin/payments',       icon: CreditCard,      label: 'Payments',        end: false },
+  { to: '/clinicadmin/era',            icon: FileSpreadsheet, label: 'ERA / Remittance', end: false },
+  { to: '/clinicadmin/discovery',      icon: SearchCheck,     label: 'Ins. Discovery',  end: false },
   { to: '/clinicadmin/statements',     icon: Receipt,         label: 'Statements',      end: false },
   { to: '/clinicadmin/insurance',      icon: ShieldCheck,     label: 'Insurance',       end: false },
 ]

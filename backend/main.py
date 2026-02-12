@@ -1819,6 +1819,17 @@ class CreateStatementRequest(BaseModel):
     line_items: Optional[str] = None
     due_date: Optional[str] = None
 
+
+class InsuranceDiscoveryRequest(BaseModel):
+    first_name: str
+    last_name: str
+    date_of_birth: str
+    gender: str = "U"
+    address1: str = ""
+    city: str = ""
+    state: str = ""
+    postal_code: str = ""
+
 class CreateDoctorNoteRequest(BaseModel):
     doctor_id: int
     patient_id: int
@@ -2969,6 +2980,9 @@ async def get_clinics():
 from services.claims_edit_engine import edit_engine
 from services.eligibility_service import eligibility_service
 from services.coding_service import coding_service
+from services.claims_service import claims_service
+from services.insurance_discovery_service import insurance_discovery_service
+from services.era_service import era_service
 
 # --- Claims ---
 
@@ -2980,6 +2994,12 @@ async def get_claims(status: Optional[str] = None, limit: int = 100):
         return JSONResponse(content={"claims": claims, "count": len(claims)})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/claims/service-status")
+async def claims_service_status():
+    """Return claims service configuration status."""
+    return JSONResponse(content=claims_service.get_status())
 
 
 @app.get("/api/clinicadmin/claims/summary")
@@ -3081,7 +3101,7 @@ async def scrub_claim(claim_id: int):
 
 @app.post("/api/clinicadmin/claims/{claim_id}/submit")
 async def submit_claim(claim_id: int):
-    """Submit a validated claim to the clearinghouse (simulated)."""
+    """Submit a validated claim to the clearinghouse via Stedi (or simulated)."""
     try:
         claim = db.get_claim(claim_id)
         if not claim:
@@ -3097,8 +3117,41 @@ async def submit_claim(claim_id: int):
                     "message": "Claim failed scrubbing",
                     "scrub_results": results
                 }, status_code=400)
-        db.update_claim_status(claim_id, "submitted", "Submitted to clearinghouse")
-        return JSONResponse(content={"success": True, "message": "Claim submitted to clearinghouse"})
+
+        # Submit via Stedi claims service (or simulated)
+        submission = claims_service.submit_claim(claim)
+        details = f"Submitted via {submission.get('source', 'unknown')}"
+        if submission.get("claim_reference"):
+            details += f" (ref: {submission['claim_reference']})"
+
+        if submission.get("success"):
+            db.update_claim_status(claim_id, "submitted", details)
+            return JSONResponse(content={
+                "success": True,
+                "message": "Claim submitted to clearinghouse",
+                "submission": submission,
+            })
+        else:
+            return JSONResponse(content={
+                "success": False,
+                "message": submission.get("error", "Submission failed"),
+                "submission": submission,
+            }, status_code=400)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/clinicadmin/claims/{claim_id}/check-status")
+async def check_claim_status_endpoint(claim_id: int):
+    """Check claim status via 276/277 inquiry."""
+    try:
+        claim = db.get_claim(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        result = claims_service.check_claim_status(claim)
+        return JSONResponse(content=result)
     except HTTPException:
         raise
     except Exception as e:
@@ -3166,14 +3219,28 @@ class EligibilitySettingsRequest(BaseModel):
 
 @app.post("/api/clinicadmin/eligibility/settings")
 async def update_eligibility_settings(req: EligibilitySettingsRequest):
-    """Update eligibility service configuration at runtime."""
+    """Update eligibility service configuration at runtime.
+    Also syncs the API key/provider info to claims, discovery, and ERA services."""
     if req.api_key is not None:
         eligibility_service.set_api_key(req.api_key)
+        claims_service.set_api_key(req.api_key)
+        insurance_discovery_service.set_api_key(req.api_key)
+        era_service.set_api_key(req.api_key)
     eligibility_service.set_provider_info(
         npi=req.provider_npi,
         name=req.provider_name,
         org=req.provider_org,
     )
+    if req.provider_npi or req.provider_name or req.provider_org:
+        claims_service.set_provider_info(
+            npi=req.provider_npi,
+            name=req.provider_name,
+            org=req.provider_org,
+        )
+        insurance_discovery_service.set_provider_info(
+            npi=req.provider_npi,
+            org=req.provider_org,
+        )
     return JSONResponse(content=eligibility_service.get_status())
 
 
@@ -3191,6 +3258,61 @@ async def test_eligibility_connection():
     """Test the Stedi API connection using a known mock request."""
     result = eligibility_service.test_connection()
     return JSONResponse(content=result)
+
+
+# --- Insurance Discovery ---
+
+@app.post("/api/clinicadmin/insurance-discovery")
+async def discover_insurance(request: InsuranceDiscoveryRequest):
+    """Discover patient insurance coverage from demographics."""
+    try:
+        result = insurance_discovery_service.discover(
+            first_name=request.first_name,
+            last_name=request.last_name,
+            date_of_birth=request.date_of_birth,
+            gender=request.gender,
+            address1=request.address1,
+            city=request.city,
+            state=request.state,
+            postal_code=request.postal_code,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/insurance-discovery/status")
+async def insurance_discovery_status():
+    """Return insurance discovery service status."""
+    return JSONResponse(content=insurance_discovery_service.get_status())
+
+
+# --- ERA / Remittance Advice ---
+
+@app.get("/api/clinicadmin/era/status")
+async def era_service_status():
+    """Return ERA service configuration status."""
+    return JSONResponse(content=era_service.get_status())
+
+
+@app.get("/api/clinicadmin/era")
+async def list_eras(page: int = 1, per_page: int = 25):
+    """List ERA / remittance advice reports."""
+    try:
+        result = era_service.list_eras(page=page, per_page=per_page)
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clinicadmin/era/{era_id}")
+async def get_era_detail(era_id: str):
+    """Get detailed ERA with claim-level breakdown."""
+    try:
+        result = era_service.get_era_detail(era_id)
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Payments ---

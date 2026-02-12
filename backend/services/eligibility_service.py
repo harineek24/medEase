@@ -424,116 +424,234 @@ class EligibilityService:
 
     def _parse_stedi_response(self, data: Dict, payer_name: str) -> Dict:
         """
-        Parse Stedi's 271 JSON response into our standard result format.
-        The Stedi response structure follows the X12 271 layout.
+        Parse Stedi's 271 JSON response into our result format.
+        Extracts in-network/out-of-network breakdown, per-service copays,
+        prior auth flags, payer notes, subscriber details, and visit limits.
         """
         now = datetime.now().isoformat()
 
-        # Check for plan status (active/inactive)
+        # --- Plan status & eligibility ---
         plan_status = data.get("planStatus", [])
         plan_date_info = data.get("planDateInformation", {})
+        plan_info = data.get("planInformation", {})
 
-        # Determine eligibility from planStatus
         is_eligible = False
         coverage_type = None
         plan_name = None
         denial_reason = None
 
         for status in plan_status:
-            status_code = status.get("statusCode", "")
-            if status_code == "1":  # Active Coverage
+            sc = status.get("statusCode", "")
+            if sc == "1":  # Active
                 is_eligible = True
-                plan_name = status.get("planDetails", status.get("groupDescription", ""))
+                plan_name = (
+                    status.get("planDetails")
+                    or status.get("groupDescription")
+                    or plan_info.get("planName")
+                )
                 coverage_type = status.get("insuranceTypeCode", "")
-            elif status_code == "6":  # Inactive
+            elif sc == "6":
                 denial_reason = "Coverage inactive"
-            elif status_code == "7":  # Unavailable
+            elif sc == "7":
                 denial_reason = "Coverage unavailable – contact payer"
 
-        # If no planStatus, check top-level
         if not plan_status:
-            # Check subscriber info
-            subscriber = data.get("subscriber", {})
-            if subscriber:
+            sub = data.get("subscriber", {})
+            if sub:
                 is_eligible = True
-                plan_name = data.get("planInformation", {}).get("planName", payer_name + " Plan")
+                plan_name = plan_info.get("planName", payer_name + " Plan")
 
-        # Extract benefits info
+        # Pull coverage type from benefits if not in planStatus
+        if not coverage_type:
+            for b in data.get("benefitsInformation", []):
+                it = b.get("insuranceTypeCode") or b.get("insuranceType")
+                if it:
+                    coverage_type = it
+                    break
+
+        # --- Subscriber details ---
+        sub_data = data.get("subscriber", {})
+        subscriber_info = {
+            "member_id": sub_data.get("memberId"),
+            "first_name": sub_data.get("firstName"),
+            "last_name": sub_data.get("lastName"),
+            "date_of_birth": sub_data.get("dateOfBirth"),
+            "gender": sub_data.get("gender"),
+            "group_number": (
+                sub_data.get("groupNumber")
+                or plan_info.get("groupNumber")
+            ),
+            "group_name": plan_info.get("groupDescription"),
+        }
+
+        # --- Benefits parsing ---
         benefits = data.get("benefitsInformation", [])
-        copay = None
-        deductible = None
-        deductible_met = None
-        coinsurance = None
-        oop_max = None
-        oop_met = None
+
+        # Accumulators: in_network and out_of_network
+        inn = {"copay": None, "deductible": None, "deductible_remaining": None,
+               "coinsurance": None, "oop_max": None, "oop_remaining": None}
+        oon = {"copay": None, "deductible": None, "deductible_remaining": None,
+               "coinsurance": None, "oop_max": None, "oop_remaining": None}
+
+        service_copays = []      # per-service copay list
+        auth_required = []       # services needing prior auth
+        payer_notes = []         # additionalInformation messages
+        visit_limits = []        # quantity-based limits
+
+        def _float(v):
+            if v is None:
+                return None
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return None
 
         for b in benefits:
             code = b.get("code", "")
-            amount = b.get("benefitAmount")
-            percent = b.get("benefitPercent")
-            time_qualifier = b.get("timeQualifierCode", "")
-            in_network = b.get("inPlanNetworkIndicatorCode", "") == "Y"
+            amount = _float(b.get("benefitAmount"))
+            percent = _float(b.get("benefitPercent"))
+            tq = b.get("timeQualifierCode", "")
+            net_code = b.get("inPlanNetworkIndicatorCode", "")
+            is_inn = net_code in ("Y", "W", "U", "")
+            is_oon = net_code in ("N", "W", "U", "")
+            cl = b.get("coverageLevelCode", "")
+            service_types = b.get("serviceTypes", [])
+            service_type_str = ", ".join(service_types) if service_types else ""
 
-            if amount:
-                try:
-                    amount = float(amount)
-                except (ValueError, TypeError):
-                    amount = None
-
-            if percent:
-                try:
-                    percent = float(percent)
-                except (ValueError, TypeError):
-                    percent = None
+            # Pick target bucket(s)
+            targets = []
+            if is_inn:
+                targets.append(inn)
+            if is_oon and net_code == "N":
+                targets.append(oon)
 
             # B = Co-Payment
-            if code == "B" and amount is not None and copay is None:
-                copay = amount
+            if code == "B" and amount is not None:
+                for t in targets:
+                    if t["copay"] is None:
+                        t["copay"] = amount
+                if service_type_str:
+                    service_copays.append({
+                        "service": service_type_str,
+                        "amount": amount,
+                        "network": "In-Network" if is_inn else "Out-of-Network",
+                    })
 
             # C = Deductible
-            if code == "C" and time_qualifier == "23":  # Calendar Year
-                if amount is not None:
-                    if b.get("coverageLevelCode") == "IND":
-                        deductible = amount
+            if code == "C" and amount is not None:
+                if tq == "23":  # Calendar Year total
+                    # Accept IND, or empty (many payers omit coverageLevelCode)
+                    if cl in ("IND", ""):
+                        for t in targets:
+                            if t["deductible"] is None:
+                                t["deductible"] = amount
+                elif tq == "29":  # Remaining
+                    if cl in ("IND", ""):
+                        for t in targets:
+                            if t["deductible_remaining"] is None:
+                                t["deductible_remaining"] = amount
 
             # A = Co-Insurance
-            if code == "A" and percent is not None and coinsurance is None:
-                coinsurance = percent * 100 if percent <= 1 else percent
+            if code == "A" and percent is not None:
+                pct = percent * 100 if percent <= 1 else percent
+                for t in targets:
+                    if t["coinsurance"] is None:
+                        t["coinsurance"] = pct
 
-            # G = Out of Pocket Maximum
-            if code == "G" and time_qualifier == "23":
-                if amount is not None and oop_max is None:
-                    oop_max = amount
+            # G = Out of Pocket (Stop Loss)
+            if code == "G" and amount is not None:
+                if tq == "23":
+                    for t in targets:
+                        if t["oop_max"] is None:
+                            t["oop_max"] = amount
+                elif tq == "29":
+                    for t in targets:
+                        if t["oop_remaining"] is None:
+                            t["oop_remaining"] = amount
 
-            # Remaining deductible
-            if code == "C" and b.get("quantityQualifierCode") == "LA":
-                if amount is not None:
-                    deductible_met = (deductible or 0) - amount if deductible else None
+            # Prior auth required
+            auth = b.get("authOrCertIndicator", "")
+            if auth == "Y" and service_type_str:
+                auth_required.append(service_type_str)
+
+            # Visit / quantity limits
+            qty = b.get("quantity")
+            qty_qual = b.get("quantityQualifier", "")
+            if qty and service_type_str:
+                visit_limits.append({
+                    "service": service_type_str,
+                    "limit": f"{qty} {qty_qual}".strip(),
+                })
+
+            # Payer notes / messages
+            for info in b.get("additionalInformation", []):
+                desc = info.get("description", "")
+                if desc and desc not in payer_notes:
+                    payer_notes.append(desc)
+
+        # Compute "met" from total - remaining
+        def _met(total, remaining):
+            if total is not None and remaining is not None:
+                return round(total - remaining, 2)
+            return None
+
+        inn_deductible_met = _met(inn["deductible"], inn["deductible_remaining"])
+        oon_deductible_met = _met(oon["deductible"], oon["deductible_remaining"])
+        inn_oop_met = _met(inn["oop_max"], inn["oop_remaining"])
+        oon_oop_met = _met(oon["oop_max"], oon["oop_remaining"])
 
         # Dates
-        effective_date = plan_date_info.get("planBegin", None)
-        termination_date = plan_date_info.get("planEnd", None)
+        effective_date = plan_date_info.get("planBegin")
+        termination_date = plan_date_info.get("planEnd")
 
-        # Check for errors in the response
+        # Errors
         errors = data.get("errors", [])
         if errors and not is_eligible:
             denial_reason = "; ".join(e.get("description", str(e)) for e in errors)
 
+        # --- Build result ---
+        # Keep the original flat fields for backwards compat (use in-network values)
         result = {
             "is_eligible": is_eligible,
             "coverage_type": coverage_type,
             "plan_name": plan_name,
-            "copay": copay,
-            "deductible": deductible,
-            "deductible_met": deductible_met,
-            "coinsurance_percent": coinsurance,
-            "out_of_pocket_max": oop_max,
-            "out_of_pocket_met": oop_met,
+            "copay": inn["copay"],
+            "deductible": inn["deductible"],
+            "deductible_met": inn_deductible_met,
+            "coinsurance_percent": inn["coinsurance"],
+            "out_of_pocket_max": inn["oop_max"],
+            "out_of_pocket_met": inn_oop_met,
             "effective_date": effective_date,
             "termination_date": termination_date,
             "denial_reason": denial_reason,
             "checked_at": now,
             "_source": "stedi_live",
+            # Extended data
+            "subscriber": subscriber_info,
+            "in_network": {
+                "copay": inn["copay"],
+                "deductible": inn["deductible"],
+                "deductible_met": inn_deductible_met,
+                "deductible_remaining": inn["deductible_remaining"],
+                "coinsurance": inn["coinsurance"],
+                "oop_max": inn["oop_max"],
+                "oop_met": inn_oop_met,
+                "oop_remaining": inn["oop_remaining"],
+            },
+            "out_of_network": {
+                "copay": oon["copay"],
+                "deductible": oon["deductible"],
+                "deductible_met": oon_deductible_met,
+                "deductible_remaining": oon["deductible_remaining"],
+                "coinsurance": oon["coinsurance"],
+                "oop_max": oon["oop_max"],
+                "oop_met": oon_oop_met,
+                "oop_remaining": oon["oop_remaining"],
+            },
+            "service_copays": service_copays[:10],
+            "auth_required": auth_required,
+            "payer_notes": payer_notes[:10],
+            "visit_limits": visit_limits[:10],
         }
         return result
 

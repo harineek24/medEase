@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +83,24 @@ interface ScrubResult {
   warnings: Array<{ category: string; message: string }>;
 }
 
+interface ClaimStatusResult {
+  success: boolean;
+  source: string;
+  overall_status: string;
+  overall_description: string;
+  statuses: Array<{
+    category: string;
+    category_description: string;
+    status_code: string;
+    status_description: string;
+    effective_date: string;
+    total_charge: string;
+    claim_payment_amount: string;
+  }>;
+  payer_claim_number?: string;
+  error?: string;
+}
+
 export default function ClaimDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -90,6 +109,8 @@ export default function ClaimDetail() {
   const [error, setError] = useState<string | null>(null);
   const [scrubResult, setScrubResult] = useState<ScrubResult | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [claimStatus, setClaimStatus] = useState<ClaimStatusResult | null>(null);
+  const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string; source?: string } | null>(null);
 
   const fetchClaim = useCallback(async () => {
     setLoading(true);
@@ -123,17 +144,33 @@ export default function ClaimDetail() {
 
   const handleSubmit = async () => {
     setActionLoading(true);
+    setSubmitResult(null);
     try {
       const res = await fetch(`${API}/api/clinicadmin/claims/${id}/submit`, { method: "POST" });
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
-        alert(data.detail || "Submit failed");
         if (data.scrub_results) setScrubResult(data.scrub_results);
+        setSubmitResult({ success: false, message: data.message || data.detail || "Submit failed", source: data.submission?.source });
       } else {
+        setSubmitResult({ success: true, message: data.message || "Submitted", source: data.submission?.source });
         fetchClaim();
       }
     } catch {
-      alert("Submit failed");
+      setSubmitResult({ success: false, message: "Submit failed" });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCheckStatus = async () => {
+    setActionLoading(true);
+    setClaimStatus(null);
+    try {
+      const res = await fetch(`${API}/api/clinicadmin/claims/${id}/check-status`, { method: "POST" });
+      const data = await res.json();
+      setClaimStatus(data);
+    } catch {
+      setClaimStatus({ success: false, source: "error", overall_status: "error", overall_description: "Failed to check status", statuses: [], error: "Network error" });
     } finally {
       setActionLoading(false);
     }
@@ -189,7 +226,7 @@ export default function ClaimDetail() {
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap">
         {(claim.status === "draft" || claim.status === "validated") && (
           <button onClick={handleScrub} disabled={actionLoading}
             className="inline-flex items-center gap-2 rounded-lg border border-[#45BFD3] px-4 py-2 text-sm font-medium text-[#45BFD3] hover:bg-[#45BFD3]/10 transition disabled:opacity-60">
@@ -200,6 +237,12 @@ export default function ClaimDetail() {
           <button onClick={handleSubmit} disabled={actionLoading}
             className="inline-flex items-center gap-2 rounded-lg bg-[#45BFD3] px-4 py-2 text-sm font-medium text-white shadow hover:bg-[#3caebb] transition disabled:opacity-60">
             <Send className="h-4 w-4" /> Submit to Clearinghouse
+          </button>
+        )}
+        {["submitted", "acknowledged", "adjudicated"].includes(claim.status) && (
+          <button onClick={handleCheckStatus} disabled={actionLoading}
+            className="inline-flex items-center gap-2 rounded-lg border border-indigo-500 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 transition disabled:opacity-60">
+            <Search className="h-4 w-4" /> Check Payer Status (276)
           </button>
         )}
         {claim.status === "submitted" && (
@@ -222,6 +265,20 @@ export default function ClaimDetail() {
         )}
       </div>
 
+      {/* Submission result */}
+      {submitResult && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          className={cn("rounded-xl border p-4", submitResult.success ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50")}>
+          <div className="flex items-center gap-2">
+            {submitResult.success ? <CheckCircle2 className="h-5 w-5 text-green-600" /> : <XCircle className="h-5 w-5 text-red-600" />}
+            <h3 className={cn("font-semibold", submitResult.success ? "text-green-700" : "text-red-700")}>{submitResult.message}</h3>
+            {submitResult.source && (
+              <span className="ml-auto rounded-full bg-white/80 px-2 py-0.5 text-xs font-medium text-gray-500">{submitResult.source}</span>
+            )}
+          </div>
+        </motion.div>
+      )}
+
       {/* Scrub results */}
       {scrubResult && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -235,6 +292,47 @@ export default function ClaimDetail() {
           {scrubResult.warnings.map((w, i) => (
             <p key={i} className="mt-1 text-sm text-amber-600">{w.message}</p>
           ))}
+        </motion.div>
+      )}
+
+      {/* Claim Status Result (276/277) */}
+      {claimStatus && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-indigo-800">Payer Claim Status (277 Response)</h3>
+            <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-medium text-gray-500">{claimStatus.source}</span>
+          </div>
+          {claimStatus.error ? (
+            <p className="text-sm text-red-600">{claimStatus.error}</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <span className={cn("rounded-full px-3 py-1 text-sm font-medium",
+                  claimStatus.overall_status === "finalized" ? "bg-green-100 text-green-700" :
+                  claimStatus.overall_status === "acknowledged" ? "bg-purple-100 text-purple-700" :
+                  claimStatus.overall_status === "rejected" ? "bg-red-100 text-red-700" :
+                  claimStatus.overall_status === "pending" ? "bg-amber-100 text-amber-700" :
+                  "bg-gray-100 text-gray-600"
+                )}>{claimStatus.overall_status}</span>
+                <span className="text-sm text-gray-700">{claimStatus.overall_description}</span>
+              </div>
+              {claimStatus.payer_claim_number && (
+                <p className="text-xs text-gray-500">Payer Claim #: <span className="font-mono">{claimStatus.payer_claim_number}</span></p>
+              )}
+              {claimStatus.statuses.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {claimStatus.statuses.map((s, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <span className="font-mono text-xs text-indigo-600">{s.category}</span>
+                      <span className="text-gray-700">{s.category_description || s.status_description}</span>
+                      {s.total_charge && <span className="ml-auto text-gray-500">{currency(Number(s.total_charge))}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </motion.div>
       )}
 
