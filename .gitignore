@@ -88,3 +88,4 @@ temp/
 # OS files
 Thumbs.db
 Desktop.ini
+*.db
