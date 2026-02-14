@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/caveat": "^5.2.8",
+    "@fontsource/dancing-script": "^5.2.8",
     "@react-three/fiber": "^8.15.12",
     "@react-three/postprocessing": "^2.15.12",
     "@tailwindcss/postcss": "^4.1.18",
