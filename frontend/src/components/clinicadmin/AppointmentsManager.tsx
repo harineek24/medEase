@@ -14,8 +14,9 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { API_BASE_URL } from "@/api";
 
-const API = "http://localhost:8000";
+const API = API_BASE_URL;
 
 /* ---------- Types ---------- */
 interface Appointment {

@@ -12,8 +12,9 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { API_BASE_URL } from "@/api";
 
-const API = "http://localhost:8000";
+const API = API_BASE_URL;
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);

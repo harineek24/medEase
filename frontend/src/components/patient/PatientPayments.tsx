@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Loader2, AlertCircle, RefreshCw, DollarSign } from "lucide-react";
+import { API_BASE_URL } from "@/api";
 
-const API = "http://localhost:8000";
+const API = API_BASE_URL;
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
