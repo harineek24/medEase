@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 interface Claim {
   id: number;
@@ -45,7 +45,7 @@ export default function ClearinghousePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims`);
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims`);
       if (!res.ok) throw new Error(`Fetch failed`);
       const data = await res.json();
       const eligible = (data.claims || []).filter((c: Claim) => ["draft", "validated"].includes(c.status));
@@ -62,7 +62,7 @@ export default function ClearinghousePage() {
   const scrubClaim = async (claimId: number) => {
     setProcessing(prev => new Set(prev).add(claimId));
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims/${claimId}/scrub`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims/${claimId}/scrub`, { method: "POST" });
       const data = await res.json();
       setScrubResults(prev => ({ ...prev, [claimId]: data }));
       fetchClaims();
@@ -76,7 +76,7 @@ export default function ClearinghousePage() {
   const submitClaim = async (claimId: number) => {
     setProcessing(prev => new Set(prev).add(claimId));
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims/${claimId}/submit`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims/${claimId}/submit`, { method: "POST" });
       if (!res.ok) {
         const data = await res.json();
         if (data.scrub_results) setScrubResults(prev => ({ ...prev, [claimId]: data.scrub_results }));

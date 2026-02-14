@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 interface ClaimsSummary {
   total_claims: number;
@@ -83,10 +83,10 @@ export default function ClaimsDashboard() {
     setError(null);
     try {
       const url = statusFilter
-        ? `${API}/api/clinicadmin/claims?status=${statusFilter}`
-        : `${API}/api/clinicadmin/claims`;
+        ? `${API_BASE_URL}/api/clinicadmin/claims?status=${statusFilter}`
+        : `${API_BASE_URL}/api/clinicadmin/claims`;
       const [sRes, cRes] = await Promise.all([
-        fetch(`${API}/api/clinicadmin/claims/summary`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/claims/summary`),
         fetch(url),
       ]);
       if (!sRes.ok) throw new Error(`Summary fetch failed`);
@@ -106,8 +106,8 @@ export default function ClaimsDashboard() {
   useEffect(() => {
     if (!showModal) return;
     Promise.all([
-      fetch(`${API}/api/patients`).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/doctors`).then(r => r.ok ? r.json() : { doctors: [] }),
+      fetch(`${API_BASE_URL}/api/patients`).then(r => r.ok ? r.json() : []),
+      fetch(`${API_BASE_URL}/api/doctors`).then(r => r.ok ? r.json() : { doctors: [] }),
     ]).then(([p, d]) => {
       setPatients(Array.isArray(p) ? p : []);
       setDoctors(d.doctors || []);
@@ -117,7 +117,7 @@ export default function ClaimsDashboard() {
   useEffect(() => {
     if (!cptSearch) { setCptResults([]); return; }
     const t = setTimeout(() => {
-      fetch(`${API}/api/codes/cpt?q=${encodeURIComponent(cptSearch)}&limit=10`)
+      fetch(`${API_BASE_URL}/api/codes/cpt?q=${encodeURIComponent(cptSearch)}&limit=10`)
         .then(r => r.json())
         .then(d => setCptResults(d.results || []))
         .catch(() => {});
@@ -142,7 +142,7 @@ export default function ClaimsDashboard() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

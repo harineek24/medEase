@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
@@ -57,8 +57,8 @@ export default function PaymentsDashboard() {
     setError(null);
     try {
       const [sRes, pRes] = await Promise.all([
-        fetch(`${API}/api/clinicadmin/payments/summary`),
-        fetch(`${API}/api/clinicadmin/payments`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/payments/summary`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/payments`),
       ]);
       if (sRes.ok) setSummary(await sRes.json());
       if (pRes.ok) {
@@ -76,14 +76,14 @@ export default function PaymentsDashboard() {
 
   useEffect(() => {
     if (!showModal) return;
-    fetch(`${API}/api/patients`).then(r => r.ok ? r.json() : []).then(setPatients).catch(() => {});
+    fetch(`${API_BASE_URL}/api/patients`).then(r => r.ok ? r.json() : []).then(setPatients).catch(() => {});
   }, [showModal]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/payments`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/payments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

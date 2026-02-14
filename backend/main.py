@@ -28,9 +28,14 @@ load_dotenv()
 app = FastAPI(title="MedEase - EHR Summarizer API")
 
 # Configure CORS
+_cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+_frontend_url = os.getenv("FRONTEND_URL")
+if _frontend_url:
+    _cors_origins.append(_frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -3458,4 +3463,5 @@ async def portal_make_payment(patient_id: int, request: RecordPaymentRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

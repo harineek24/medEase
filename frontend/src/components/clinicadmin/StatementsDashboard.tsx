@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
@@ -51,8 +51,8 @@ export default function StatementsDashboard() {
     setError(null);
     try {
       const url = statusFilter
-        ? `${API}/api/clinicadmin/statements?status=${statusFilter}`
-        : `${API}/api/clinicadmin/statements`;
+        ? `${API_BASE_URL}/api/clinicadmin/statements?status=${statusFilter}`
+        : `${API_BASE_URL}/api/clinicadmin/statements`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Fetch failed");
       const data = await res.json();
@@ -68,14 +68,14 @@ export default function StatementsDashboard() {
 
   useEffect(() => {
     if (!showModal) return;
-    fetch(`${API}/api/patients`).then(r => r.ok ? r.json() : []).then(setPatients).catch(() => {});
+    fetch(`${API_BASE_URL}/api/patients`).then(r => r.ok ? r.json() : []).then(setPatients).catch(() => {});
   }, [showModal]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/statements`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/statements`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

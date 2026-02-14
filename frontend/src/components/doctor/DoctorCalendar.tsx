@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */

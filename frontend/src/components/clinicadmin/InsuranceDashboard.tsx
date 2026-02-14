@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 /* ---------- Types ---------- */
 interface Patient {
@@ -57,7 +57,7 @@ export default function InsuranceDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const pRes = await fetch(`${API}/api/patients`);
+      const pRes = await fetch(`${API_BASE_URL}/api/patients`);
       if (!pRes.ok) throw new Error(`Patients fetch failed (${pRes.status})`);
       const patients: Patient[] = await pRes.json();
 
@@ -65,7 +65,7 @@ export default function InsuranceDashboard() {
         patients.map(async (patient) => {
           try {
             const iRes = await fetch(
-              `${API}/api/clinicadmin/insurance/${patient.id}`,
+              `${API_BASE_URL}/api/clinicadmin/insurance/${patient.id}`,
             );
             if (!iRes.ok) return { patient, insurance: null };
             const insurance: InsuranceInfo = await iRes.json();

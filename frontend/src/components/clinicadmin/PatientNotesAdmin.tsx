@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 /* ---------- Types ---------- */
 interface PatientOption {
@@ -103,8 +103,8 @@ export default function PatientNotesAdmin() {
     setError(null);
     try {
       const [pRes, nRes] = await Promise.all([
-        fetch(`${API}/api/patients`),
-        fetch(`${API}/api/clinicadmin/notes`),
+        fetch(`${API_BASE_URL}/api/patients`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/notes`),
       ]);
       if (pRes.ok) setPatients(await pRes.json());
       if (nRes.ok) setNotes(await nRes.json());
@@ -180,7 +180,7 @@ export default function PatientNotesAdmin() {
       if (audioBlob) {
         const formData = new FormData();
         formData.append("file", audioBlob, "recording.webm");
-        const upRes = await fetch(`${API}/api/upload/audio`, {
+        const upRes = await fetch(`${API_BASE_URL}/api/upload/audio`, {
           method: "POST",
           body: formData,
         });
@@ -192,7 +192,7 @@ export default function PatientNotesAdmin() {
 
       const noteType: "text" | "voice" = audioBlob ? "voice" : "text";
 
-      const res = await fetch(`${API}/api/clinicadmin/notes`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -211,7 +211,7 @@ export default function PatientNotesAdmin() {
       discardRecording();
 
       /* Re-fetch notes */
-      const nRes = await fetch(`${API}/api/clinicadmin/notes`);
+      const nRes = await fetch(`${API_BASE_URL}/api/clinicadmin/notes`);
       if (nRes.ok) setNotes(await nRes.json());
     } catch {
       alert("Failed to send note.");

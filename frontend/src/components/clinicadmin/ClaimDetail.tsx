@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
@@ -116,7 +116,7 @@ export default function ClaimDetail() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims/${id}`);
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims/${id}`);
       if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
       setClaim(await res.json());
     } catch (err: unknown) {
@@ -131,7 +131,7 @@ export default function ClaimDetail() {
   const handleScrub = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims/${id}/scrub`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims/${id}/scrub`, { method: "POST" });
       const data = await res.json();
       setScrubResult(data);
       fetchClaim();
@@ -146,7 +146,7 @@ export default function ClaimDetail() {
     setActionLoading(true);
     setSubmitResult(null);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims/${id}/submit`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims/${id}/submit`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
         if (data.scrub_results) setScrubResult(data.scrub_results);
@@ -166,7 +166,7 @@ export default function ClaimDetail() {
     setActionLoading(true);
     setClaimStatus(null);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims/${id}/check-status`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims/${id}/check-status`, { method: "POST" });
       const data = await res.json();
       setClaimStatus(data);
     } catch {
@@ -179,7 +179,7 @@ export default function ClaimDetail() {
   const handleStatusChange = async (newStatus: string) => {
     setActionLoading(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/claims/${id}/status`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/claims/${id}/status`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),

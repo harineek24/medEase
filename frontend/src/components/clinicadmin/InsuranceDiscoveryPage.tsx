@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 interface Coverage {
   payer_name: string;
@@ -57,7 +57,7 @@ export default function InsuranceDiscoveryPage() {
   const [status, setStatus] = useState<ServiceStatus | null>(null);
 
   useEffect(() => {
-    fetch(`${API}/api/clinicadmin/insurance-discovery/status`)
+    fetch(`${API_BASE_URL}/api/clinicadmin/insurance-discovery/status`)
       .then(r => r.ok ? r.json() : null)
       .then(setStatus)
       .catch(() => {});
@@ -68,7 +68,7 @@ export default function InsuranceDiscoveryPage() {
     setSearching(true);
     setResult(null);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/insurance-discovery`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/insurance-discovery`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),

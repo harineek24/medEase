@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 /* ---------- Types ---------- */
 interface DashboardStats {
@@ -62,7 +62,7 @@ export default function ClinicAdminDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/stats`);
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/stats`);
       if (!res.ok) throw new Error(`Failed to fetch stats (${res.status})`);
       const data: DashboardStats = await res.json();
       setStats(data);

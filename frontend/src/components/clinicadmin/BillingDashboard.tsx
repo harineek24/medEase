@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 /* ---------- Types ---------- */
 interface BillingSummary {
@@ -97,8 +97,8 @@ export default function BillingDashboard() {
     setError(null);
     try {
       const [sRes, rRes] = await Promise.all([
-        fetch(`${API}/api/clinicadmin/billing/summary`),
-        fetch(`${API}/api/clinicadmin/billing`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/billing/summary`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/billing`),
       ]);
       if (!sRes.ok) throw new Error(`Summary fetch failed (${sRes.status})`);
       if (!rRes.ok) throw new Error(`Records fetch failed (${rRes.status})`);
@@ -118,7 +118,7 @@ export default function BillingDashboard() {
   /* Fetch patients for form */
   useEffect(() => {
     if (!showModal) return;
-    fetch(`${API}/api/patients`)
+    fetch(`${API_BASE_URL}/api/patients`)
       .then((r) => (r.ok ? r.json() : []))
       .then(setPatients)
       .catch(() => {});
@@ -147,7 +147,7 @@ export default function BillingDashboard() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/billing`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/billing`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

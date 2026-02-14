@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
@@ -101,8 +101,8 @@ export default function ERAPage() {
     setError(null);
     try {
       const [eraRes, statusRes] = await Promise.all([
-        fetch(`${API}/api/clinicadmin/era`),
-        fetch(`${API}/api/clinicadmin/era/status`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/era`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/era/status`),
       ]);
       if (eraRes.ok) {
         const data = await eraRes.json();
@@ -125,7 +125,7 @@ export default function ERAPage() {
     }
     setDetailLoading(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/era/${eraId}`);
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/era/${eraId}`);
       if (!res.ok) throw new Error("Failed to load ERA detail");
       setSelectedEra(await res.json());
     } catch {

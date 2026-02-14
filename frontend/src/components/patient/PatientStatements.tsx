@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Receipt, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
@@ -35,7 +35,7 @@ export default function PatientStatements({ patientId }: { patientId: number }) 
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/api/portal/patient/${patientId}/statements`);
+      const res = await fetch(`${API_BASE_URL}/api/portal/patient/${patientId}/statements`);
       if (!res.ok) throw new Error("Failed to load statements");
       const data = await res.json();
       setStatements(data.statements || []);

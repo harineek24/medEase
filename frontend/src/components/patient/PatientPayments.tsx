@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Loader2, AlertCircle, RefreshCw, DollarSign } from "lucide-react";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
@@ -44,8 +44,8 @@ export default function PatientPayments({ patientId }: { patientId: number }) {
     setError(null);
     try {
       const [bRes, pRes] = await Promise.all([
-        fetch(`${API}/api/portal/patient/${patientId}/billing`),
-        fetch(`${API}/api/portal/patient/${patientId}/payments`),
+        fetch(`${API_BASE_URL}/api/portal/patient/${patientId}/billing`),
+        fetch(`${API_BASE_URL}/api/portal/patient/${patientId}/payments`),
       ]);
       if (bRes.ok) {
         const bData = await bRes.json();
@@ -69,7 +69,7 @@ export default function PatientPayments({ patientId }: { patientId: number }) {
     setSubmitting(true);
     setSuccess(false);
     try {
-      const res = await fetch(`${API}/api/portal/patient/${patientId}/payments`, {
+      const res = await fetch(`${API_BASE_URL}/api/portal/patient/${patientId}/payments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

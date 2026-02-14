@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 const PAYERS = ["Aetna", "Blue Cross", "Cigna", "United Healthcare", "Kaiser", "Humana", "Medicaid"];
 
@@ -107,9 +107,9 @@ export default function EligibilityPage() {
     setLoading(true);
     try {
       const [pRes, hRes, sRes] = await Promise.all([
-        fetch(`${API}/api/patients`),
-        fetch(`${API}/api/clinicadmin/eligibility/history`),
-        fetch(`${API}/api/clinicadmin/eligibility/status`),
+        fetch(`${API_BASE_URL}/api/patients`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/eligibility/history`),
+        fetch(`${API_BASE_URL}/api/clinicadmin/eligibility/status`),
       ]);
       if (pRes.ok) setPatients(await pRes.json());
       if (hRes.ok) {
@@ -140,7 +140,7 @@ export default function EligibilityPage() {
     setVerifying(true);
     setResult(null);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/eligibility/verify`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/eligibility/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -164,7 +164,7 @@ export default function EligibilityPage() {
     e.preventDefault();
     setSavingSettings(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/eligibility/settings`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/eligibility/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -190,7 +190,7 @@ export default function EligibilityPage() {
     if (!payerQuery || payerQuery.length < 2) return;
     setSearchingPayers(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/eligibility/payers?query=${encodeURIComponent(payerQuery)}`);
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/eligibility/payers?query=${encodeURIComponent(payerQuery)}`);
       if (res.ok) {
         const data = await res.json();
         setPayerResults(data.payers || []);
@@ -204,7 +204,7 @@ export default function EligibilityPage() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/eligibility/test`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/eligibility/test`, { method: "POST" });
       if (res.ok) setTestResult(await res.json());
       else setTestResult({ success: false, error: "Request failed" });
     } catch { setTestResult({ success: false, error: "Network error" }); } finally {

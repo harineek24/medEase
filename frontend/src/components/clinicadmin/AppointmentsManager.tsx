@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL } from "@/api";
 
 /* ---------- Types ---------- */
 interface Appointment {
@@ -84,9 +84,9 @@ export default function AppointmentsManager() {
     setLoading(true);
     setError(null);
     try {
-      let url = `${API}/api/clinicadmin/appointments/today`;
-      if (activeTab === "week") url = `${API}/api/clinicadmin/appointments?range=week`;
-      if (activeTab === "all") url = `${API}/api/clinicadmin/appointments?range=all`;
+      let url = `${API_BASE_URL}/api/clinicadmin/appointments/today`;
+      if (activeTab === "week") url = `${API_BASE_URL}/api/clinicadmin/appointments?range=week`;
+      if (activeTab === "all") url = `${API_BASE_URL}/api/clinicadmin/appointments?range=all`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Failed to fetch appointments (${res.status})`);
       const data: Appointment[] = await res.json();
@@ -108,9 +108,9 @@ export default function AppointmentsManager() {
     const load = async () => {
       try {
         const [pRes, dRes, sRes] = await Promise.all([
-          fetch(`${API}/api/patients`),
-          fetch(`${API}/api/doctors`),
-          fetch(`${API}/api/services`),
+          fetch(`${API_BASE_URL}/api/patients`),
+          fetch(`${API_BASE_URL}/api/doctors`),
+          fetch(`${API_BASE_URL}/api/services`),
         ]);
         if (pRes.ok) setPatients(await pRes.json());
         if (dRes.ok) setDoctors(await dRes.json());
@@ -127,7 +127,7 @@ export default function AppointmentsManager() {
     setUpdatingId(id);
     try {
       const res = await fetch(
-        `${API}/api/clinicadmin/appointments/${id}/status`,
+        `${API_BASE_URL}/api/clinicadmin/appointments/${id}/status`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -150,7 +150,7 @@ export default function AppointmentsManager() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/clinicadmin/appointments`, {
+      const res = await fetch(`${API_BASE_URL}/api/clinicadmin/appointments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
