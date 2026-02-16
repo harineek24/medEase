@@ -1,23 +1,21 @@
 """
 MedEase Database Layer
-SQLite database with SQLAlchemy for storing patient records, summaries, and chat history.
+PostgreSQL (Neon) database for storing patient records, summaries, and chat history.
 """
 
 import os
 import json
-import sqlite3
+import psycopg2
+import psycopg2.extras
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 
-# Database file path
-DB_PATH = os.path.join(os.path.dirname(__file__), "medease.db")
-
 
 def get_connection():
-    """Get a database connection with row factory for dict-like access."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """Get a database connection with RealDictCursor for dict-like access."""
+    DATABASE_URL = os.environ.get("DATABASE_URL", "")
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
 
@@ -43,7 +41,7 @@ def init_database():
         # Patients table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS patients (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 date_of_birth TEXT,
                 username TEXT UNIQUE,
@@ -52,7 +50,7 @@ def init_database():
                 phone TEXT,
                 address TEXT,
                 emergency_contact TEXT,
-                is_active INTEGER DEFAULT 1,
+                is_active BOOLEAN DEFAULT TRUE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
@@ -61,7 +59,7 @@ def init_database():
         # Summaries table - stores EHR analysis results
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS summaries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER,
                 raw_summary TEXT NOT NULL,
                 file_path TEXT,
@@ -79,7 +77,7 @@ def init_database():
         # Medications table - stores medication details per summary
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS medications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 summary_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
                 dosage TEXT,
@@ -95,7 +93,7 @@ def init_database():
         # Test results table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS test_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 summary_id INTEGER NOT NULL,
                 test_name TEXT NOT NULL,
                 value TEXT,
@@ -110,7 +108,7 @@ def init_database():
         # Drug interactions table - stores analysis results
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS drug_interactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 summary_id INTEGER NOT NULL,
                 drug1 TEXT NOT NULL,
                 drug2 TEXT NOT NULL,
@@ -125,7 +123,7 @@ def init_database():
         # Chat messages table - for both patient-specific and general chats
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS chat_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 session_id TEXT NOT NULL,
                 chat_type TEXT NOT NULL,
                 patient_id INTEGER,
@@ -141,7 +139,7 @@ def init_database():
         # Analytics table - for tracking usage stats
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS analytics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 event_type TEXT NOT NULL,
                 event_data TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -151,11 +149,11 @@ def init_database():
         # Consultation sessions table - for voice consultations
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS consultation_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 session_id TEXT UNIQUE NOT NULL,
                 patient_id INTEGER,
                 status TEXT DEFAULT 'active',
-                is_emergency INTEGER DEFAULT 0,
+                is_emergency BOOLEAN DEFAULT FALSE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 completed_at TEXT,
@@ -166,12 +164,12 @@ def init_database():
         # Consultation fields table - stores extracted information
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS consultation_fields (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 session_id TEXT NOT NULL,
                 field_name TEXT NOT NULL,
                 field_label TEXT NOT NULL,
                 field_value TEXT NOT NULL,
-                confirmed INTEGER DEFAULT 0,
+                confirmed BOOLEAN DEFAULT FALSE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES consultation_sessions(session_id)
@@ -181,7 +179,7 @@ def init_database():
         # Clinics table - stores clinic information
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS clinics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 address TEXT,
                 city TEXT,
@@ -193,7 +191,7 @@ def init_database():
                 description TEXT,
                 logo_url TEXT,
                 operating_hours TEXT,
-                is_active INTEGER DEFAULT 1,
+                is_active BOOLEAN DEFAULT TRUE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
@@ -202,7 +200,7 @@ def init_database():
         # Doctors table - stores physician information
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS doctors (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 clinic_id INTEGER,
                 first_name TEXT NOT NULL,
                 last_name TEXT NOT NULL,
@@ -215,11 +213,11 @@ def init_database():
                 phone TEXT,
                 bio TEXT,
                 photo_url TEXT,
-                accepting_patients INTEGER DEFAULT 1,
+                accepting_patients BOOLEAN DEFAULT TRUE,
                 languages TEXT DEFAULT 'English',
                 education TEXT,
                 certifications TEXT,
-                is_active INTEGER DEFAULT 1,
+                is_active BOOLEAN DEFAULT TRUE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (clinic_id) REFERENCES clinics(id)
@@ -229,14 +227,14 @@ def init_database():
         # Clinic services table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS clinic_services (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 clinic_id INTEGER NOT NULL,
                 service_name TEXT NOT NULL,
                 description TEXT,
                 category TEXT,
                 duration_minutes INTEGER DEFAULT 30,
                 price REAL,
-                is_active INTEGER DEFAULT 1,
+                is_active BOOLEAN DEFAULT TRUE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (clinic_id) REFERENCES clinics(id)
             )
@@ -245,7 +243,7 @@ def init_database():
         # Appointments table - for scheduling
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS appointments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER,
                 doctor_id INTEGER,
                 clinic_id INTEGER,
@@ -267,13 +265,13 @@ def init_database():
         # Admin users table - for clinic management
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS admin_users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 email TEXT,
                 role TEXT DEFAULT 'staff',
                 clinic_id INTEGER,
-                is_active INTEGER DEFAULT 1,
+                is_active BOOLEAN DEFAULT TRUE,
                 last_login TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (clinic_id) REFERENCES clinics(id)
@@ -283,7 +281,7 @@ def init_database():
         # Consultation configs table - admin-configurable voice consultation settings
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS consultation_configs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 config_id TEXT UNIQUE NOT NULL,
                 clinic_id INTEGER,
                 name TEXT NOT NULL,
@@ -295,7 +293,7 @@ def init_database():
                 success_message TEXT DEFAULT 'Thank you for completing the consultation!',
                 emergency_message TEXT DEFAULT 'This appears to be an emergency. Please call 911 immediately.',
                 settings TEXT DEFAULT '{}',
-                is_active INTEGER DEFAULT 1,
+                is_active BOOLEAN DEFAULT TRUE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (clinic_id) REFERENCES clinics(id)
@@ -305,7 +303,7 @@ def init_database():
         # Vitals table - stores patient vital signs
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS vitals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 recorded_by INTEGER,
                 heart_rate REAL,
@@ -325,13 +323,13 @@ def init_database():
         # Doctor notes table - text + voice notes from doctor to patient
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS doctor_notes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 doctor_id INTEGER NOT NULL,
                 patient_id INTEGER NOT NULL,
                 note_type TEXT DEFAULT 'text',
                 content TEXT,
                 audio_url TEXT,
-                is_read INTEGER DEFAULT 0,
+                is_read BOOLEAN DEFAULT FALSE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (doctor_id) REFERENCES doctors(id),
                 FOREIGN KEY (patient_id) REFERENCES patients(id)
@@ -341,7 +339,7 @@ def init_database():
         # Journal entries table - patient daily journal entries
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS journal_entries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 entry_text TEXT,
                 mood TEXT,
@@ -355,7 +353,7 @@ def init_database():
         # Billing table - patient billing and credit balances
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS billing (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 appointment_id INTEGER,
                 description TEXT NOT NULL,
@@ -373,7 +371,7 @@ def init_database():
         # Insurance table - patient insurance info
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS insurance (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 provider_name TEXT NOT NULL,
                 policy_number TEXT,
@@ -384,7 +382,7 @@ def init_database():
                 copay REAL,
                 deductible REAL,
                 deductible_met REAL DEFAULT 0,
-                is_primary INTEGER DEFAULT 1,
+                is_primary BOOLEAN DEFAULT TRUE,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (patient_id) REFERENCES patients(id)
             )
@@ -393,7 +391,7 @@ def init_database():
         # Claims table - CMS-1500 medical claims
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS claims (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 provider_id INTEGER,
                 insurance_id INTEGER,
@@ -422,7 +420,7 @@ def init_database():
         # Claim line items
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS claim_lines (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 claim_id INTEGER NOT NULL,
                 line_number INTEGER DEFAULT 1,
                 cpt_code TEXT NOT NULL,
@@ -441,7 +439,7 @@ def init_database():
         # Revenue cycle events - tracks claim lifecycle
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS revenue_cycle_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 claim_id INTEGER NOT NULL,
                 event_type TEXT NOT NULL,
                 old_status TEXT,
@@ -455,7 +453,7 @@ def init_database():
         # Payments ledger
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS payments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 claim_id INTEGER,
                 billing_id INTEGER,
@@ -474,7 +472,7 @@ def init_database():
         # Eligibility verification checks
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS eligibility_checks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 insurance_id INTEGER,
                 payer_name TEXT,
@@ -500,7 +498,7 @@ def init_database():
         # Patient statements
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS statements (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 statement_number TEXT UNIQUE,
                 total_amount REAL NOT NULL,
@@ -517,7 +515,7 @@ def init_database():
         # Prescriptions table - e-prescribing
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS prescriptions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 doctor_id INTEGER NOT NULL,
                 medication_name TEXT NOT NULL,
@@ -538,7 +536,7 @@ def init_database():
         # Lab results table - labs and radiology
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS lab_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 ordered_by INTEGER,
                 lab_type TEXT NOT NULL,
@@ -547,7 +545,7 @@ def init_database():
                 unit TEXT,
                 reference_range TEXT,
                 status TEXT DEFAULT 'pending',
-                is_abnormal INTEGER DEFAULT 0,
+                is_abnormal BOOLEAN DEFAULT FALSE,
                 notes TEXT,
                 ordered_date TEXT DEFAULT CURRENT_TIMESTAMP,
                 result_date TEXT,
@@ -559,7 +557,7 @@ def init_database():
         # Patient updates table - stores text/voice health updates with LLM summaries
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS patient_updates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 patient_id INTEGER NOT NULL,
                 update_text TEXT,
                 audio_url TEXT,
@@ -574,7 +572,7 @@ def init_database():
         # Doctor replies to patient updates
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS doctor_replies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 doctor_id INTEGER NOT NULL,
                 patient_id INTEGER NOT NULL,
                 update_id INTEGER NOT NULL,
@@ -612,10 +610,12 @@ def _migrate_doctors_table(cursor):
         ("accepted_insurance", "TEXT DEFAULT ''"),
     ]
     for col_name, col_type in new_columns:
-        try:
+        cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'doctors' AND column_name = %s
+        """, (col_name,))
+        if not cursor.fetchone():
             cursor.execute(f"ALTER TABLE doctors ADD COLUMN {col_name} {col_type}")
-        except Exception:
-            pass  # Column already exists
 
 
 def _ensure_doctor_extras(cursor):
@@ -640,14 +640,14 @@ def _ensure_doctor_extras(cursor):
 
     for doc_id, fee, rating, reviews, lat, lng, hours, insurance in doctor_extras:
         # Only update if available_hours is empty/default
-        cursor.execute("SELECT available_hours FROM doctors WHERE id = ?", (doc_id,))
+        cursor.execute("SELECT available_hours FROM doctors WHERE id = %s", (doc_id,))
         row = cursor.fetchone()
         if row and (not row['available_hours'] or row['available_hours'] == '{}'):
             cursor.execute("""
-                UPDATE doctors SET consultation_fee = ?, rating = ?, review_count = ?,
-                                  location_lat = ?, location_lng = ?, available_hours = ?,
-                                  accepted_insurance = ?
-                WHERE id = ?
+                UPDATE doctors SET consultation_fee = %s, rating = %s, review_count = %s,
+                                  location_lat = %s, location_lng = %s, available_hours = %s,
+                                  accepted_insurance = %s
+                WHERE id = %s
             """, (fee, rating, reviews, lat, lng, hours, insurance, doc_id))
 
 
@@ -725,7 +725,7 @@ def _seed_sample_data(cursor):
     for clinic in clinics:
         cursor.execute("""
             INSERT INTO clinics (name, address, city, state, zip_code, phone, email, website, description, operating_hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (clinic["name"], clinic["address"], clinic["city"], clinic["state"],
               clinic["zip_code"], clinic["phone"], clinic["email"], clinic["website"],
               clinic["description"], clinic["operating_hours"]))
@@ -883,7 +883,7 @@ def _seed_sample_data(cursor):
         cursor.execute("""
             INSERT INTO doctors (clinic_id, first_name, last_name, title, specialty, sub_specialty,
                                npi_number, email, bio, languages, education, certifications)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (doc["clinic_id"], doc["first_name"], doc["last_name"], doc["title"],
               doc["specialty"], doc["sub_specialty"], doc["npi_number"], doc["email"],
               doc["bio"], doc["languages"], doc["education"], doc["certifications"]))
@@ -905,10 +905,10 @@ def _seed_sample_data(cursor):
 
     for doc_id, fee, rating, reviews, lat, lng, hours, insurance in doctor_extras:
         cursor.execute("""
-            UPDATE doctors SET consultation_fee = ?, rating = ?, review_count = ?,
-                              location_lat = ?, location_lng = ?, available_hours = ?,
-                              accepted_insurance = ?
-            WHERE id = ?
+            UPDATE doctors SET consultation_fee = %s, rating = %s, review_count = %s,
+                              location_lat = %s, location_lng = %s, available_hours = %s,
+                              accepted_insurance = %s
+            WHERE id = %s
         """, (fee, rating, reviews, lat, lng, hours, insurance, doc_id))
 
     # Sample Services for each clinic
@@ -943,7 +943,7 @@ def _seed_sample_data(cursor):
     for svc in services:
         cursor.execute("""
             INSERT INTO clinic_services (clinic_id, service_name, category, duration_minutes, price)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
         """, (svc["clinic_id"], svc["service_name"], svc["category"], svc["duration_minutes"], svc["price"]))
 
     # Create default admin user (password: admin123 - should be changed!)
@@ -951,7 +951,7 @@ def _seed_sample_data(cursor):
     password_hash = hashlib.sha256("admin123".encode()).hexdigest()
     cursor.execute("""
         INSERT INTO admin_users (username, password_hash, email, role)
-        VALUES (?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s)
     """, ("admin", password_hash, "admin@medease.com", "superadmin"))
 
     # =========================================================================
@@ -962,7 +962,7 @@ def _seed_sample_data(cursor):
     # First patient gets login credentials (default test patient)
     default_pw = _hl.sha256("patient123".encode()).hexdigest()
     cursor.execute(
-        "INSERT INTO patients (name, date_of_birth, username, password_hash, email) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO patients (name, date_of_birth, username, password_hash, email) VALUES (%s, %s, %s, %s, %s)",
         ("Maria Garcia", "1985-03-14", "maria", default_pw, "maria.garcia@email.com")
     )
 
@@ -981,7 +981,7 @@ def _seed_sample_data(cursor):
 
     for pt in other_patients:
         cursor.execute(
-            "INSERT INTO patients (name, date_of_birth) VALUES (?, ?)",
+            "INSERT INTO patients (name, date_of_birth) VALUES (%s, %s) RETURNING id",
             (pt["name"], pt["date_of_birth"])
         )
 
@@ -1037,7 +1037,7 @@ def _seed_sample_data(cursor):
         cursor.execute("""
             INSERT INTO appointments (patient_id, doctor_id, clinic_id, service_id,
                                      appointment_date, appointment_time, duration_minutes, status, notes)
-            VALUES (?, ?, ?, ?, ?, ?, 30, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, 30, %s, %s)
         """, (apt["patient_id"], apt["doctor_id"], apt["clinic_id"], apt["service_id"],
               apt["date"], apt["time"], apt["status"], apt["notes"]))
 
@@ -1076,7 +1076,7 @@ def _seed_sample_data(cursor):
         cursor.execute("""
             INSERT INTO vitals (patient_id, recorded_by, heart_rate, systolic_bp, diastolic_bp,
                                oxygen_level, temperature, respiratory_rate, weight, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (v["patient_id"], v["recorded_by"], v["heart_rate"], v["systolic_bp"], v["diastolic_bp"],
               v["oxygen_level"], v["temperature"], v["respiratory_rate"], v["weight"], v["notes"]))
 
@@ -1107,7 +1107,7 @@ def _seed_sample_data(cursor):
     for note in doctor_notes:
         cursor.execute("""
             INSERT INTO doctor_notes (doctor_id, patient_id, note_type, content)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
         """, (note["doctor_id"], note["patient_id"], note["note_type"], note["content"]))
 
     # =========================================================================
@@ -1157,7 +1157,7 @@ def _seed_sample_data(cursor):
     for je in journal_entries:
         cursor.execute("""
             INSERT INTO journal_entries (patient_id, entry_text, mood, pain_level, symptoms, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, (je["patient_id"], je["entry_text"], je["mood"], je["pain_level"], je["symptoms"], je["created_at"]))
 
     # =========================================================================
@@ -1196,7 +1196,7 @@ def _seed_sample_data(cursor):
         cursor.execute("""
             INSERT INTO billing (patient_id, appointment_id, description, amount,
                                 insurance_covered, patient_responsibility, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (bill["patient_id"], bill["appointment_id"], bill["description"], bill["amount"],
               bill["insurance_covered"], bill["patient_responsibility"], bill["status"]))
 
@@ -1225,7 +1225,7 @@ def _seed_sample_data(cursor):
     for ins in insurance_records:
         cursor.execute("""
             INSERT INTO insurance (patient_id, provider_name, policy_number, group_number, copay, deductible)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, (ins["patient_id"], ins["provider_name"], ins["policy_number"],
               ins["group_number"], ins["copay"], ins["deductible"]))
 
@@ -1279,7 +1279,7 @@ def _seed_sample_data(cursor):
         cursor.execute("""
             INSERT INTO prescriptions (patient_id, doctor_id, medication_name, dosage, frequency,
                                        quantity, refills, instructions, pharmacy)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (rx["patient_id"], rx["doctor_id"], rx["medication_name"], rx["dosage"], rx["frequency"],
               rx["quantity"], rx["refills"], rx["instructions"], rx["pharmacy"]))
 
@@ -1362,7 +1362,7 @@ def _seed_sample_data(cursor):
         cursor.execute("""
             INSERT INTO lab_results (patient_id, ordered_by, lab_type, test_name, result_value,
                                      unit, reference_range, is_abnormal, notes, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (lab["patient_id"], lab["ordered_by"], lab["lab_type"], lab["test_name"],
               lab["result_value"], lab["unit"], lab["reference_range"], lab["is_abnormal"],
               lab["notes"], lab["status"]))
@@ -1379,17 +1379,17 @@ def create_patient(name: str, date_of_birth: Optional[str] = None) -> int:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO patients (name, date_of_birth) VALUES (?, ?)",
+            "INSERT INTO patients (name, date_of_birth) VALUES (%s, %s) RETURNING id",
             (name, date_of_birth)
         )
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_patient(patient_id: int) -> Optional[Dict]:
     """Get a patient by ID."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM patients WHERE id = ?", (patient_id,))
+        cursor.execute("SELECT * FROM patients WHERE id = %s", (patient_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
 
@@ -1399,7 +1399,7 @@ def get_patient_by_name(name: str) -> Optional[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM patients WHERE LOWER(name) LIKE LOWER(?) ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM patients WHERE LOWER(name) LIKE LOWER(%s) ORDER BY created_at DESC LIMIT 1",
             (f"%{name}%",)
         )
         row = cursor.fetchone()
@@ -1419,7 +1419,7 @@ def search_patients(query: str) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM patients WHERE LOWER(name) LIKE LOWER(?) ORDER BY created_at DESC",
+            "SELECT * FROM patients WHERE LOWER(name) LIKE LOWER(%s) ORDER BY created_at DESC",
             (f"%{query}%",)
         )
         return [dict(row) for row in cursor.fetchall()]
@@ -1447,10 +1447,11 @@ def create_summary(
             INSERT INTO summaries
             (patient_id, raw_summary, file_path, original_filename, diagnosis,
              visit_date, visit_location, next_steps, warning_signs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (patient_id, raw_summary, file_path, original_filename, diagnosis,
               visit_date, visit_location, next_steps, warning_signs))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_summary(summary_id: int) -> Optional[Dict]:
@@ -1459,7 +1460,7 @@ def get_summary(summary_id: int) -> Optional[Dict]:
         cursor = conn.cursor()
 
         # Get summary
-        cursor.execute("SELECT * FROM summaries WHERE id = ?", (summary_id,))
+        cursor.execute("SELECT * FROM summaries WHERE id = %s", (summary_id,))
         summary = cursor.fetchone()
         if not summary:
             return None
@@ -1467,15 +1468,15 @@ def get_summary(summary_id: int) -> Optional[Dict]:
         summary_dict = dict(summary)
 
         # Get medications
-        cursor.execute("SELECT * FROM medications WHERE summary_id = ?", (summary_id,))
+        cursor.execute("SELECT * FROM medications WHERE summary_id = %s", (summary_id,))
         summary_dict['medications'] = [dict(row) for row in cursor.fetchall()]
 
         # Get test results
-        cursor.execute("SELECT * FROM test_results WHERE summary_id = ?", (summary_id,))
+        cursor.execute("SELECT * FROM test_results WHERE summary_id = %s", (summary_id,))
         summary_dict['test_results'] = [dict(row) for row in cursor.fetchall()]
 
         # Get interactions
-        cursor.execute("SELECT * FROM drug_interactions WHERE summary_id = ?", (summary_id,))
+        cursor.execute("SELECT * FROM drug_interactions WHERE summary_id = %s", (summary_id,))
         summary_dict['interactions'] = [dict(row) for row in cursor.fetchall()]
 
         return summary_dict
@@ -1486,7 +1487,7 @@ def get_patient_summaries(patient_id: int) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM summaries WHERE patient_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM summaries WHERE patient_id = %s ORDER BY created_at DESC",
             (patient_id,)
         )
         return [dict(row) for row in cursor.fetchall()]
@@ -1501,7 +1502,7 @@ def get_all_summaries(limit: int = 50) -> List[Dict]:
             FROM summaries s
             LEFT JOIN patients p ON s.patient_id = p.id
             ORDER BY s.created_at DESC
-            LIMIT ?
+            LIMIT %s
         """, (limit,))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -1530,9 +1531,10 @@ def add_medication(
         cursor.execute("""
             INSERT INTO medications
             (summary_id, name, dosage, frequency, purpose, rxcui, drug_class)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (summary_id, name, dosage, frequency, purpose, rxcui, drug_class))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_all_medications() -> List[Dict]:
@@ -1569,7 +1571,7 @@ def get_medications_timeline() -> List[Dict]:
             cursor.execute("""
                 SELECT id, name, dosage, frequency, purpose, drug_class
                 FROM medications
-                WHERE summary_id = ?
+                WHERE summary_id = %s
                 ORDER BY name ASC
             """, (summary['summary_id'],))
             summary['medications'] = [dict(row) for row in cursor.fetchall()]
@@ -1595,9 +1597,10 @@ def add_test_result(
         cursor.execute("""
             INSERT INTO test_results
             (summary_id, test_name, value, unit, reference_range, status)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (summary_id, test_name, value, unit, reference_range, status))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_test_result_history(test_name: str) -> list:
@@ -1610,7 +1613,7 @@ def get_test_result_history(test_name: str) -> list:
                    s.original_filename, s.visit_date
             FROM test_results tr
             JOIN summaries s ON s.id = tr.summary_id
-            WHERE LOWER(tr.test_name) LIKE LOWER(?)
+            WHERE LOWER(tr.test_name) LIKE LOWER(%s)
             ORDER BY tr.created_at ASC
         """, (f"%{test_name}%",))
         return [dict(row) for row in cursor.fetchall()]
@@ -1621,11 +1624,10 @@ def get_all_test_names() -> list:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT DISTINCT test_name, status,
-                   MAX(created_at) as latest_at
+            SELECT DISTINCT ON (LOWER(test_name)) test_name, status,
+                   created_at as latest_at
             FROM test_results
-            GROUP BY LOWER(test_name)
-            ORDER BY latest_at DESC
+            ORDER BY LOWER(test_name), created_at DESC
         """)
         return [dict(row) for row in cursor.fetchall()]
 
@@ -1648,9 +1650,10 @@ def add_drug_interaction(
         cursor.execute("""
             INSERT INTO drug_interactions
             (summary_id, drug1, drug2, severity, description, recommendation)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (summary_id, drug1, drug2, severity, description, recommendation))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 # =============================================================================
@@ -1671,9 +1674,10 @@ def save_chat_message(
         cursor.execute("""
             INSERT INTO chat_messages
             (session_id, chat_type, patient_id, summary_id, role, content)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (session_id, chat_type, patient_id, summary_id, role, content))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_chat_history(session_id: str, limit: int = 50) -> List[Dict]:
@@ -1682,9 +1686,9 @@ def get_chat_history(session_id: str, limit: int = 50) -> List[Dict]:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM chat_messages
-            WHERE session_id = ?
+            WHERE session_id = %s
             ORDER BY created_at ASC
-            LIMIT ?
+            LIMIT %s
         """, (session_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -1695,9 +1699,9 @@ def get_patient_chat_history(patient_id: int, limit: int = 50) -> List[Dict]:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM chat_messages
-            WHERE patient_id = ?
+            WHERE patient_id = %s
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT %s
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -1711,7 +1715,7 @@ def log_analytics_event(event_type: str, event_data: Optional[str] = None):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO analytics (event_type, event_data) VALUES (?, ?)",
+            "INSERT INTO analytics (event_type, event_data) VALUES (%s, %s)",
             (event_type, event_data)
         )
 
@@ -1796,9 +1800,10 @@ def create_consultation_session(session_id: str, patient_id: Optional[int] = Non
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO consultation_sessions (session_id, patient_id)
-            VALUES (?, ?)
+            VALUES (%s, %s)
+         RETURNING id
         """, (session_id, patient_id))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_consultation_session(session_id: str) -> Optional[Dict]:
@@ -1806,7 +1811,7 @@ def get_consultation_session(session_id: str) -> Optional[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM consultation_sessions WHERE session_id = ?",
+            "SELECT * FROM consultation_sessions WHERE session_id = %s",
             (session_id,)
         )
         row = cursor.fetchone()
@@ -1831,24 +1836,24 @@ def update_consultation_session(
         params = []
 
         if status:
-            updates.append("status = ?")
+            updates.append("status = %s")
             params.append(status)
             if status == 'completed':
                 updates.append("completed_at = CURRENT_TIMESTAMP")
 
         if is_emergency is not None:
-            updates.append("is_emergency = ?")
-            params.append(1 if is_emergency else 0)
+            updates.append("is_emergency = %s")
+            params.append(is_emergency)
 
         if patient_id:
-            updates.append("patient_id = ?")
+            updates.append("patient_id = %s")
             params.append(patient_id)
 
         params.append(session_id)
         cursor.execute(f"""
             UPDATE consultation_sessions
             SET {', '.join(updates)}
-            WHERE session_id = ?
+            WHERE session_id = %s
         """, params)
 
 
@@ -1865,7 +1870,7 @@ def save_consultation_field(
         # Check if field exists
         cursor.execute("""
             SELECT id FROM consultation_fields
-            WHERE session_id = ? AND field_name = ?
+            WHERE session_id = %s AND field_name = %s
         """, (session_id, field_name))
         existing = cursor.fetchone()
 
@@ -1873,18 +1878,19 @@ def save_consultation_field(
             # Update existing field
             cursor.execute("""
                 UPDATE consultation_fields
-                SET field_value = ?, field_label = ?, confirmed = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE session_id = ? AND field_name = ?
-            """, (field_value, field_label, 1 if confirmed else 0, session_id, field_name))
+                SET field_value = %s, field_label = %s, confirmed = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = %s AND field_name = %s
+            """, (field_value, field_label, confirmed, session_id, field_name))
             return existing['id']
         else:
             # Insert new field
             cursor.execute("""
                 INSERT INTO consultation_fields
                 (session_id, field_name, field_label, field_value, confirmed)
-                VALUES (?, ?, ?, ?, ?)
-            """, (session_id, field_name, field_label, field_value, 1 if confirmed else 0))
-            return cursor.lastrowid
+                VALUES (%s, %s, %s, %s, %s)
+             RETURNING id
+        """, (session_id, field_name, field_label, field_value, confirmed))
+            return cursor.fetchone()['id']
 
 
 def confirm_consultation_field(session_id: str, field_name: str) -> bool:
@@ -1893,8 +1899,8 @@ def confirm_consultation_field(session_id: str, field_name: str) -> bool:
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE consultation_fields
-            SET confirmed = 1, updated_at = CURRENT_TIMESTAMP
-            WHERE session_id = ? AND field_name = ?
+            SET confirmed = TRUE, updated_at = CURRENT_TIMESTAMP
+            WHERE session_id = %s AND field_name = %s
         """, (session_id, field_name))
         return cursor.rowcount > 0
 
@@ -1905,8 +1911,8 @@ def update_consultation_field(session_id: str, field_name: str, new_value: str) 
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE consultation_fields
-            SET field_value = ?, confirmed = 1, updated_at = CURRENT_TIMESTAMP
-            WHERE session_id = ? AND field_name = ?
+            SET field_value = %s, confirmed = TRUE, updated_at = CURRENT_TIMESTAMP
+            WHERE session_id = %s AND field_name = %s
         """, (new_value, session_id, field_name))
         return cursor.rowcount > 0
 
@@ -1917,7 +1923,7 @@ def get_consultation_fields(session_id: str) -> List[Dict]:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM consultation_fields
-            WHERE session_id = ?
+            WHERE session_id = %s
             ORDER BY created_at ASC
         """, (session_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -1933,7 +1939,7 @@ def get_all_consultations(limit: int = 50) -> List[Dict]:
             FROM consultation_sessions cs
             LEFT JOIN patients p ON cs.patient_id = p.id
             ORDER BY cs.created_at DESC
-            LIMIT ?
+            LIMIT %s
         """, (limit,))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -1947,10 +1953,10 @@ def get_consultations_for_doctor_today(doctor_id: int) -> list:
             FROM consultation_sessions cs
             JOIN patients p ON p.id = cs.patient_id
             WHERE cs.patient_id IN (
-                SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = ?
+                SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = %s
             )
             AND cs.status = 'completed'
-            AND date(cs.completed_at) = date('now')
+            AND date(cs.completed_at) = CURRENT_DATE
             ORDER BY cs.completed_at DESC
         """, (doctor_id,))
         sessions = [dict(row) for row in cursor.fetchall()]
@@ -1965,9 +1971,9 @@ def get_patient_consultations(patient_id: int, limit: int = 50) -> list:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM consultation_sessions
-            WHERE patient_id = ? AND status = 'completed'
+            WHERE patient_id = %s AND status = 'completed'
             ORDER BY completed_at DESC
-            LIMIT ?
+            LIMIT %s
         """, (patient_id, limit))
         sessions = [dict(row) for row in cursor.fetchall()]
         for session in sessions:
@@ -1995,7 +2001,7 @@ def get_clinic(clinic_id: int) -> Optional[Dict]:
     """Get a clinic by ID with its doctors and services."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM clinics WHERE id = ?", (clinic_id,))
+        cursor.execute("SELECT * FROM clinics WHERE id = %s", (clinic_id,))
         clinic = cursor.fetchone()
         if not clinic:
             return None
@@ -2004,14 +2010,14 @@ def get_clinic(clinic_id: int) -> Optional[Dict]:
 
         # Get doctors
         cursor.execute("""
-            SELECT * FROM doctors WHERE clinic_id = ? AND is_active = 1
+            SELECT * FROM doctors WHERE clinic_id = %s AND is_active = 1
             ORDER BY last_name
         """, (clinic_id,))
         clinic_dict['doctors'] = [dict(row) for row in cursor.fetchall()]
 
         # Get services
         cursor.execute("""
-            SELECT * FROM clinic_services WHERE clinic_id = ? AND is_active = 1
+            SELECT * FROM clinic_services WHERE clinic_id = %s AND is_active = 1
             ORDER BY category, service_name
         """, (clinic_id,))
         clinic_dict['services'] = [dict(row) for row in cursor.fetchall()]
@@ -2036,9 +2042,10 @@ def create_clinic(
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO clinics (name, address, city, state, zip_code, phone, email, website, description, operating_hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (name, address, city, state, zip_code, phone, email, website, description, operating_hours))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def update_clinic(clinic_id: int, **kwargs) -> bool:
@@ -2053,7 +2060,7 @@ def update_clinic(clinic_id: int, **kwargs) -> bool:
         for key, value in kwargs.items():
             if key in ['name', 'address', 'city', 'state', 'zip_code', 'phone',
                        'email', 'website', 'description', 'operating_hours', 'logo_url', 'is_active']:
-                fields.append(f"{key} = ?")
+                fields.append(f"{key} = %s")
                 values.append(value)
 
         if not fields:
@@ -2063,7 +2070,7 @@ def update_clinic(clinic_id: int, **kwargs) -> bool:
         values.append(clinic_id)
 
         cursor.execute(f"""
-            UPDATE clinics SET {', '.join(fields)} WHERE id = ?
+            UPDATE clinics SET {', '.join(fields)} WHERE id = %s
         """, values)
         return cursor.rowcount > 0
 
@@ -2096,7 +2103,7 @@ def get_doctor(doctor_id: int) -> Optional[Dict]:
             SELECT d.*, c.name as clinic_name
             FROM doctors d
             LEFT JOIN clinics c ON d.clinic_id = c.id
-            WHERE d.id = ?
+            WHERE d.id = %s
         """, (doctor_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -2107,7 +2114,7 @@ def get_doctors_by_clinic(clinic_id: int) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM doctors WHERE clinic_id = ? AND is_active = 1
+            SELECT * FROM doctors WHERE clinic_id = %s AND is_active = 1
             ORDER BY last_name, first_name
         """, (clinic_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -2121,7 +2128,7 @@ def get_doctors_by_specialty(specialty: str) -> List[Dict]:
             SELECT d.*, c.name as clinic_name
             FROM doctors d
             LEFT JOIN clinics c ON d.clinic_id = c.id
-            WHERE LOWER(d.specialty) LIKE LOWER(?) AND d.is_active = 1
+            WHERE LOWER(d.specialty) LIKE LOWER(%s) AND d.is_active = 1
             ORDER BY d.last_name
         """, (f"%{specialty}%",))
         return [dict(row) for row in cursor.fetchall()]
@@ -2148,10 +2155,11 @@ def create_doctor(
         cursor.execute("""
             INSERT INTO doctors (clinic_id, first_name, last_name, title, specialty, sub_specialty,
                                npi_number, email, phone, bio, languages, education, certifications)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (clinic_id, first_name, last_name, title, specialty, sub_specialty,
               npi_number, email, phone, bio, languages, education, certifications))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def update_doctor(doctor_id: int, **kwargs) -> bool:
@@ -2172,7 +2180,7 @@ def update_doctor(doctor_id: int, **kwargs) -> bool:
 
         for key, value in kwargs.items():
             if key in valid_fields:
-                fields.append(f"{key} = ?")
+                fields.append(f"{key} = %s")
                 values.append(value)
 
         if not fields:
@@ -2182,7 +2190,7 @@ def update_doctor(doctor_id: int, **kwargs) -> bool:
         values.append(doctor_id)
 
         cursor.execute(f"""
-            UPDATE doctors SET {', '.join(fields)} WHERE id = ?
+            UPDATE doctors SET {', '.join(fields)} WHERE id = %s
         """, values)
         return cursor.rowcount > 0
 
@@ -2197,7 +2205,7 @@ def get_clinic_services(clinic_id: int) -> List[Dict]:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM clinic_services
-            WHERE clinic_id = ? AND is_active = 1
+            WHERE clinic_id = %s AND is_active = 1
             ORDER BY category, service_name
         """, (clinic_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -2216,9 +2224,10 @@ def create_clinic_service(
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO clinic_services (clinic_id, service_name, description, category, duration_minutes, price)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (clinic_id, service_name, description, category, duration_minutes, price))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 # =============================================================================
@@ -2235,14 +2244,14 @@ def verify_admin_login(username: str, password: str) -> Optional[Dict]:
         cursor.execute("""
             SELECT id, username, email, role, clinic_id
             FROM admin_users
-            WHERE username = ? AND password_hash = ? AND is_active = 1
+            WHERE username = %s AND password_hash = %s AND is_active = 1
         """, (username, password_hash))
         user = cursor.fetchone()
 
         if user:
             # Update last login
             cursor.execute(
-                "UPDATE admin_users SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE admin_users SET last_login = CURRENT_TIMESTAMP WHERE id = %s",
                 (user['id'],)
             )
             return dict(user)
@@ -2259,7 +2268,7 @@ def verify_patient_login(username: str, password: str) -> Optional[Dict]:
         cursor.execute("""
             SELECT id, name, username, email, date_of_birth
             FROM patients
-            WHERE username = ? AND password_hash = ? AND is_active = 1
+            WHERE username = %s AND password_hash = %s AND is_active = 1
         """, (username, password_hash))
         user = cursor.fetchone()
         return dict(user) if user else None
@@ -2276,9 +2285,10 @@ def register_patient(name: str, username: str, password: str,
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO patients (name, username, password_hash, date_of_birth, email, phone, address)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (name, username, password_hash, date_of_birth, email, phone, address))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_admin_user(user_id: int) -> Optional[Dict]:
@@ -2287,7 +2297,7 @@ def get_admin_user(user_id: int) -> Optional[Dict]:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, username, email, role, clinic_id, last_login, created_at
-            FROM admin_users WHERE id = ?
+            FROM admin_users WHERE id = %s
         """, (user_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -2318,14 +2328,15 @@ def create_consultation_config(
             INSERT INTO consultation_configs
             (config_id, clinic_id, name, description, fields, ai_prompt, system_instruction,
              voice_name, success_message, emergency_message, settings)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (
             config_id, clinic_id, name, description,
             json_lib.dumps(fields), ai_prompt, system_instruction,
             voice_name, success_message, emergency_message,
             json_lib.dumps(settings or {})
         ))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_consultation_config(config_id: str) -> Optional[Dict]:
@@ -2334,7 +2345,7 @@ def get_consultation_config(config_id: str) -> Optional[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM consultation_configs WHERE config_id = ? AND is_active = 1",
+            "SELECT * FROM consultation_configs WHERE config_id = %s AND is_active = 1",
             (config_id,)
         )
         row = cursor.fetchone()
@@ -2353,7 +2364,7 @@ def get_all_consultation_configs(clinic_id: Optional[int] = None) -> List[Dict]:
         cursor = conn.cursor()
         if clinic_id:
             cursor.execute(
-                "SELECT * FROM consultation_configs WHERE clinic_id = ? AND is_active = 1 ORDER BY name",
+                "SELECT * FROM consultation_configs WHERE clinic_id = %s AND is_active = 1 ORDER BY name",
                 (clinic_id,)
             )
         else:
@@ -2384,7 +2395,7 @@ def update_consultation_config(config_id: str, **kwargs) -> bool:
 
         for key, value in kwargs.items():
             if key in valid_fields:
-                fields.append(f"{key} = ?")
+                fields.append(f"{key} = %s")
                 if key in ['fields', 'settings'] and isinstance(value, (dict, list)):
                     values.append(json_lib.dumps(value))
                 else:
@@ -2397,7 +2408,7 @@ def update_consultation_config(config_id: str, **kwargs) -> bool:
         values.append(config_id)
 
         cursor.execute(f"""
-            UPDATE consultation_configs SET {', '.join(fields)} WHERE config_id = ?
+            UPDATE consultation_configs SET {', '.join(fields)} WHERE config_id = %s
         """, values)
         return cursor.rowcount > 0
 
@@ -2407,7 +2418,7 @@ def delete_consultation_config(config_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE consultation_configs SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE config_id = ?",
+            "UPDATE consultation_configs SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE config_id = %s",
             (config_id,)
         )
         return cursor.rowcount > 0
@@ -2425,10 +2436,11 @@ def add_vitals(patient_id: int, heart_rate=None, systolic_bp=None, diastolic_bp=
         cursor.execute("""
             INSERT INTO vitals (patient_id, recorded_by, heart_rate, systolic_bp, diastolic_bp,
                                oxygen_level, temperature, respiratory_rate, weight, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (patient_id, recorded_by, heart_rate, systolic_bp, diastolic_bp,
               oxygen_level, temperature, respiratory_rate, weight, notes))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_patient_vitals(patient_id: int, limit: int = 50) -> List[Dict]:
@@ -2438,8 +2450,8 @@ def get_patient_vitals(patient_id: int, limit: int = 50) -> List[Dict]:
             SELECT v.*, d.first_name || ' ' || d.last_name as recorded_by_name
             FROM vitals v
             LEFT JOIN doctors d ON v.recorded_by = d.id
-            WHERE v.patient_id = ?
-            ORDER BY v.recorded_at DESC LIMIT ?
+            WHERE v.patient_id = %s
+            ORDER BY v.recorded_at DESC LIMIT %s
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -2459,9 +2471,10 @@ def create_doctor_note(doctor_id: int, patient_id: int, content: str = None,
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO doctor_notes (doctor_id, patient_id, note_type, content, audio_url)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
+         RETURNING id
         """, (doctor_id, patient_id, note_type, content, audio_url))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_patient_doctor_notes(patient_id: int, limit: int = 50) -> List[Dict]:
@@ -2473,8 +2486,8 @@ def get_patient_doctor_notes(patient_id: int, limit: int = 50) -> List[Dict]:
                    d.photo_url as doctor_photo
             FROM doctor_notes dn
             JOIN doctors d ON dn.doctor_id = d.id
-            WHERE dn.patient_id = ?
-            ORDER BY dn.created_at DESC LIMIT ?
+            WHERE dn.patient_id = %s
+            ORDER BY dn.created_at DESC LIMIT %s
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -2486,8 +2499,8 @@ def get_doctor_notes_by_doctor(doctor_id: int, limit: int = 50) -> List[Dict]:
             SELECT dn.*, p.name as patient_name
             FROM doctor_notes dn
             JOIN patients p ON dn.patient_id = p.id
-            WHERE dn.doctor_id = ?
-            ORDER BY dn.created_at DESC LIMIT ?
+            WHERE dn.doctor_id = %s
+            ORDER BY dn.created_at DESC LIMIT %s
         """, (doctor_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -2496,7 +2509,7 @@ def mark_notes_read(patient_id: int):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE doctor_notes SET is_read = 1 WHERE patient_id = ? AND is_read = 0",
+            "UPDATE doctor_notes SET is_read = 1 WHERE patient_id = %s AND is_read = 0",
             (patient_id,)
         )
 
@@ -2505,7 +2518,7 @@ def get_unread_notes_count(patient_id: int) -> int:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT COUNT(*) as count FROM doctor_notes WHERE patient_id = ? AND is_read = 0",
+            "SELECT COUNT(*) as count FROM doctor_notes WHERE patient_id = %s AND is_read = 0",
             (patient_id,)
         )
         return cursor.fetchone()['count']
@@ -2521,17 +2534,18 @@ def create_journal_entry(patient_id: int, entry_text: str = None, mood: str = No
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO journal_entries (patient_id, entry_text, mood, pain_level, symptoms)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
+         RETURNING id
         """, (patient_id, entry_text, mood, pain_level, symptoms))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_patient_journal(patient_id: int, limit: int = 50) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM journal_entries WHERE patient_id = ?
-            ORDER BY created_at DESC LIMIT ?
+            SELECT * FROM journal_entries WHERE patient_id = %s
+            ORDER BY created_at DESC LIMIT %s
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -2541,7 +2555,7 @@ def get_today_journal(patient_id: int) -> Optional[Dict]:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM journal_entries
-            WHERE patient_id = ? AND DATE(created_at) = DATE('now')
+            WHERE patient_id = %s AND DATE(created_at) = CURRENT_DATE
             ORDER BY created_at DESC LIMIT 1
         """, (patient_id,))
         row = cursor.fetchone()
@@ -2560,10 +2574,11 @@ def create_billing(patient_id: int, description: str, amount: float,
         cursor.execute("""
             INSERT INTO billing (patient_id, appointment_id, description, amount,
                                 insurance_covered, patient_responsibility, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (patient_id, appointment_id, description, amount,
               insurance_covered, patient_responsibility, status))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_patient_billing(patient_id: int, limit: int = 50) -> List[Dict]:
@@ -2573,8 +2588,8 @@ def get_patient_billing(patient_id: int, limit: int = 50) -> List[Dict]:
             SELECT b.*, p.name as patient_name
             FROM billing b
             JOIN patients p ON b.patient_id = p.id
-            WHERE b.patient_id = ?
-            ORDER BY b.created_at DESC LIMIT ?
+            WHERE b.patient_id = %s
+            ORDER BY b.created_at DESC LIMIT %s
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -2589,9 +2604,9 @@ def get_all_billing(status: str = None, limit: int = 100) -> List[Dict]:
         """
         params = []
         if status:
-            query += " WHERE b.status = ?"
+            query += " WHERE b.status = %s"
             params.append(status)
-        query += " ORDER BY b.created_at DESC LIMIT ?"
+        query += " ORDER BY b.created_at DESC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
@@ -2630,15 +2645,16 @@ def add_insurance(patient_id: int, provider_name: str, policy_number: str = None
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO insurance (patient_id, provider_name, policy_number, group_number, copay, deductible)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (patient_id, provider_name, policy_number, group_number, copay, deductible))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_patient_insurance(patient_id: int) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM insurance WHERE patient_id = ? ORDER BY is_primary DESC", (patient_id,))
+        cursor.execute("SELECT * FROM insurance WHERE patient_id = %s ORDER BY is_primary DESC", (patient_id,))
         return [dict(row) for row in cursor.fetchall()]
 
 
@@ -2658,14 +2674,15 @@ def create_claim(patient_id: int, provider_id: int = None, insurance_id: int = N
             INSERT INTO claims (patient_id, provider_id, insurance_id, claim_number,
                                claim_type, diagnosis_codes, place_of_service,
                                date_of_service, notes, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
+            RETURNING id
         """, (patient_id, provider_id, insurance_id, claim_number,
               claim_type, diagnosis_codes, place_of_service, date_of_service, notes))
-        claim_id = cursor.lastrowid
+        claim_id = cursor.fetchone()['id']
         # Log creation event
         cursor.execute("""
             INSERT INTO revenue_cycle_events (claim_id, event_type, new_status, details)
-            VALUES (?, 'created', 'draft', 'Claim created')
+            VALUES (%s, 'created', 'draft', 'Claim created')
         """, (claim_id,))
         return {"id": claim_id, "claim_number": claim_number}
 
@@ -2676,20 +2693,22 @@ def add_claim_line(claim_id: int, cpt_code: str, charge_amount: float,
     with get_db() as conn:
         cursor = conn.cursor()
         # Get next line number
-        cursor.execute("SELECT COALESCE(MAX(line_number), 0) + 1 as next_line FROM claim_lines WHERE claim_id = ?", (claim_id,))
+        cursor.execute("SELECT COALESCE(MAX(line_number), 0) + 1 as next_line FROM claim_lines WHERE claim_id = %s", (claim_id,))
         next_line = cursor.fetchone()['next_line']
         cursor.execute("""
             INSERT INTO claim_lines (claim_id, line_number, cpt_code, cpt_description,
                                      icd_codes, modifier, units, charge_amount)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (claim_id, next_line, cpt_code, cpt_description, icd_codes, modifier, units, charge_amount))
+        line_id = cursor.fetchone()['id']
         # Update claim total
         cursor.execute("""
-            UPDATE claims SET total_charge = (SELECT SUM(charge_amount * units) FROM claim_lines WHERE claim_id = ?),
+            UPDATE claims SET total_charge = (SELECT SUM(charge_amount * units) FROM claim_lines WHERE claim_id = %s),
                              updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            WHERE id = %s
         """, (claim_id, claim_id))
-        return cursor.lastrowid
+        return line_id
 
 
 def get_claim(claim_id: int) -> Optional[Dict]:
@@ -2702,17 +2721,17 @@ def get_claim(claim_id: int) -> Optional[Dict]:
             LEFT JOIN patients p ON c.patient_id = p.id
             LEFT JOIN doctors d ON c.provider_id = d.id
             LEFT JOIN insurance ins ON c.insurance_id = ins.id
-            WHERE c.id = ?
+            WHERE c.id = %s
         """, (claim_id,))
         row = cursor.fetchone()
         if not row:
             return None
         claim = dict(row)
         # Get line items
-        cursor.execute("SELECT * FROM claim_lines WHERE claim_id = ? ORDER BY line_number", (claim_id,))
+        cursor.execute("SELECT * FROM claim_lines WHERE claim_id = %s ORDER BY line_number", (claim_id,))
         claim['lines'] = [dict(r) for r in cursor.fetchall()]
         # Get events
-        cursor.execute("SELECT * FROM revenue_cycle_events WHERE claim_id = ? ORDER BY created_at DESC", (claim_id,))
+        cursor.execute("SELECT * FROM revenue_cycle_events WHERE claim_id = %s ORDER BY created_at DESC", (claim_id,))
         claim['events'] = [dict(r) for r in cursor.fetchall()]
         return claim
 
@@ -2730,9 +2749,9 @@ def get_all_claims(status: str = None, limit: int = 100) -> List[Dict]:
         """
         params = []
         if status:
-            query += " WHERE c.status = ?"
+            query += " WHERE c.status = %s"
             params.append(status)
-        query += " ORDER BY c.created_at DESC LIMIT ?"
+        query += " ORDER BY c.created_at DESC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
@@ -2741,16 +2760,16 @@ def get_all_claims(status: str = None, limit: int = 100) -> List[Dict]:
 def update_claim_status(claim_id: int, new_status: str, details: str = None) -> bool:
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT status FROM claims WHERE id = ?", (claim_id,))
+        cursor.execute("SELECT status FROM claims WHERE id = %s", (claim_id,))
         row = cursor.fetchone()
         if not row:
             return False
         old_status = row['status']
-        cursor.execute("UPDATE claims SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        cursor.execute("UPDATE claims SET status = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
                        (new_status, claim_id))
         cursor.execute("""
             INSERT INTO revenue_cycle_events (claim_id, event_type, old_status, new_status, details)
-            VALUES (?, 'status_change', ?, ?, ?)
+            VALUES (%s, 'status_change', %s, %s, %s)
         """, (claim_id, old_status, new_status, details or f"Status changed to {new_status}"))
         return True
 
@@ -2788,7 +2807,8 @@ def create_eligibility_check(patient_id: int, insurance_id: int = None,
                 is_eligible, coverage_type, copay, deductible, deductible_met,
                 coinsurance_percent, out_of_pocket_max, out_of_pocket_met,
                 plan_name, effective_date, termination_date, response_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (
             patient_id, insurance_id, payer_name,
             'completed' if result else 'pending',
@@ -2805,7 +2825,7 @@ def create_eligibility_check(patient_id: int, insurance_id: int = None,
             result.get('termination_date') if result else None,
             json.dumps(result) if result else None,
         ))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_eligibility_history(patient_id: int = None, limit: int = 50) -> List[Dict]:
@@ -2816,15 +2836,15 @@ def get_eligibility_history(patient_id: int = None, limit: int = 50) -> List[Dic
                 SELECT ec.*, p.name as patient_name
                 FROM eligibility_checks ec
                 JOIN patients p ON ec.patient_id = p.id
-                WHERE ec.patient_id = ?
-                ORDER BY ec.checked_at DESC LIMIT ?
+                WHERE ec.patient_id = %s
+                ORDER BY ec.checked_at DESC LIMIT %s
             """, (patient_id, limit))
         else:
             cursor.execute("""
                 SELECT ec.*, p.name as patient_name
                 FROM eligibility_checks ec
                 JOIN patients p ON ec.patient_id = p.id
-                ORDER BY ec.checked_at DESC LIMIT ?
+                ORDER BY ec.checked_at DESC LIMIT %s
             """, (limit,))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -2845,23 +2865,25 @@ def record_payment(patient_id: int, amount: float, payment_method: str = 'credit
         cursor.execute("""
             INSERT INTO payments (patient_id, claim_id, billing_id, amount,
                                   payment_method, payment_type, reference_number, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (patient_id, claim_id, billing_id, amount, payment_method,
               payment_type, reference_number, notes))
+        payment_id = cursor.fetchone()['id']
         # Update claim if linked
         if claim_id:
             cursor.execute("""
-                UPDATE claims SET total_paid = total_paid + ?,
-                                  patient_responsibility = CASE WHEN patient_responsibility > ? THEN patient_responsibility - ? ELSE 0 END,
+                UPDATE claims SET total_paid = total_paid + %s,
+                                  patient_responsibility = CASE WHEN patient_responsibility > %s THEN patient_responsibility - %s ELSE 0 END,
                                   updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = %s
             """, (amount, amount, amount, claim_id))
         # Update billing record if linked
         if billing_id:
             cursor.execute("""
-                UPDATE billing SET status = 'paid', payment_date = CURRENT_TIMESTAMP WHERE id = ?
+                UPDATE billing SET status = 'paid', payment_date = CURRENT_TIMESTAMP WHERE id = %s
             """, (billing_id,))
-        return cursor.lastrowid
+        return payment_id
 
 
 def get_payments(patient_id: int = None, limit: int = 100) -> List[Dict]:
@@ -2872,15 +2894,15 @@ def get_payments(patient_id: int = None, limit: int = 100) -> List[Dict]:
                 SELECT py.*, p.name as patient_name
                 FROM payments py
                 JOIN patients p ON py.patient_id = p.id
-                WHERE py.patient_id = ?
-                ORDER BY py.created_at DESC LIMIT ?
+                WHERE py.patient_id = %s
+                ORDER BY py.created_at DESC LIMIT %s
             """, (patient_id, limit))
         else:
             cursor.execute("""
                 SELECT py.*, p.name as patient_name
                 FROM payments py
                 JOIN patients p ON py.patient_id = p.id
-                ORDER BY py.created_at DESC LIMIT ?
+                ORDER BY py.created_at DESC LIMIT %s
             """, (limit,))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -2894,7 +2916,7 @@ def get_payment_summary() -> Dict:
         patient_total = cursor.fetchone()['total'] or 0
         cursor.execute("SELECT SUM(amount) as total FROM payments WHERE payment_type = 'insurance'")
         insurance_total = cursor.fetchone()['total'] or 0
-        cursor.execute("SELECT COUNT(*) as count FROM payments WHERE created_at >= date('now', '-30 days')")
+        cursor.execute("SELECT COUNT(*) as count FROM payments WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'")
         recent_count = cursor.fetchone()['count']
         return {
             "total_collected": total,
@@ -2916,9 +2938,10 @@ def create_statement(patient_id: int, total_amount: float, line_items: str = Non
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO statements (patient_id, statement_number, total_amount, amount_due, line_items, due_date)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (patient_id, stmt_number, total_amount, total_amount, line_items, due_date))
-        return {"id": cursor.lastrowid, "statement_number": stmt_number}
+        return {"id": cursor.fetchone()['id'], "statement_number": stmt_number}
 
 
 def get_patient_statements(patient_id: int, limit: int = 50) -> List[Dict]:
@@ -2928,8 +2951,8 @@ def get_patient_statements(patient_id: int, limit: int = 50) -> List[Dict]:
             SELECT s.*, p.name as patient_name
             FROM statements s
             JOIN patients p ON s.patient_id = p.id
-            WHERE s.patient_id = ?
-            ORDER BY s.created_at DESC LIMIT ?
+            WHERE s.patient_id = %s
+            ORDER BY s.created_at DESC LIMIT %s
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -2944,9 +2967,9 @@ def get_all_statements(status: str = None, limit: int = 100) -> List[Dict]:
         """
         params = []
         if status:
-            query += " WHERE s.status = ?"
+            query += " WHERE s.status = %s"
             params.append(status)
-        query += " ORDER BY s.created_at DESC LIMIT ?"
+        query += " ORDER BY s.created_at DESC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
@@ -2964,10 +2987,11 @@ def create_prescription(patient_id: int, doctor_id: int, medication_name: str,
         cursor.execute("""
             INSERT INTO prescriptions (patient_id, doctor_id, medication_name, dosage, frequency,
                                        quantity, refills, instructions, pharmacy)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (patient_id, doctor_id, medication_name, dosage, frequency,
               quantity, refills, instructions, pharmacy))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_patient_prescriptions(patient_id: int, active_only: bool = True) -> List[Dict]:
@@ -2977,7 +3001,7 @@ def get_patient_prescriptions(patient_id: int, active_only: bool = True) -> List
             SELECT p.*, d.first_name || ' ' || d.last_name as doctor_name
             FROM prescriptions p
             JOIN doctors d ON p.doctor_id = d.id
-            WHERE p.patient_id = ?
+            WHERE p.patient_id = %s
         """
         if active_only:
             query += " AND p.status = 'active'"
@@ -2999,10 +3023,11 @@ def create_lab_result(patient_id: int, lab_type: str, test_name: str,
         cursor.execute("""
             INSERT INTO lab_results (patient_id, ordered_by, lab_type, test_name,
                                      result_value, unit, reference_range, is_abnormal, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (patient_id, ordered_by, lab_type, test_name,
-              result_value, unit, reference_range, 1 if is_abnormal else 0, notes))
-        return cursor.lastrowid
+              result_value, unit, reference_range, is_abnormal, notes))
+        return cursor.fetchone()['id']
 
 
 def get_patient_labs(patient_id: int, lab_type: str = None, limit: int = 50) -> List[Dict]:
@@ -3012,13 +3037,13 @@ def get_patient_labs(patient_id: int, lab_type: str = None, limit: int = 50) -> 
             SELECT lr.*, d.first_name || ' ' || d.last_name as ordered_by_name
             FROM lab_results lr
             LEFT JOIN doctors d ON lr.ordered_by = d.id
-            WHERE lr.patient_id = ?
+            WHERE lr.patient_id = %s
         """
         params = [patient_id]
         if lab_type:
-            query += " AND lr.lab_type = ?"
+            query += " AND lr.lab_type = %s"
             params.append(lab_type)
-        query += " ORDER BY lr.ordered_date DESC LIMIT ?"
+        query += " ORDER BY lr.ordered_date DESC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
@@ -3038,13 +3063,13 @@ def get_appointments_by_doctor(doctor_id: int, status: str = None, limit: int = 
             LEFT JOIN patients p ON a.patient_id = p.id
             LEFT JOIN clinic_services cs ON a.service_id = cs.id
             LEFT JOIN clinics c ON a.clinic_id = c.id
-            WHERE a.doctor_id = ?
+            WHERE a.doctor_id = %s
         """
         params = [doctor_id]
         if status:
-            query += " AND a.status = ?"
+            query += " AND a.status = %s"
             params.append(status)
-        query += " ORDER BY a.appointment_date ASC, a.appointment_time ASC LIMIT ?"
+        query += " ORDER BY a.appointment_date ASC, a.appointment_time ASC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
@@ -3060,11 +3085,11 @@ def get_today_appointments(doctor_id: int = None) -> List[Dict]:
             LEFT JOIN patients p ON a.patient_id = p.id
             LEFT JOIN clinic_services cs ON a.service_id = cs.id
             LEFT JOIN doctors d ON a.doctor_id = d.id
-            WHERE DATE(a.appointment_date) = DATE('now')
+            WHERE DATE(a.appointment_date) = CURRENT_DATE
         """
         params = []
         if doctor_id:
-            query += " AND a.doctor_id = ?"
+            query += " AND a.doctor_id = %s"
             params.append(doctor_id)
         query += " ORDER BY a.appointment_time ASC"
         cursor.execute(query, params)
@@ -3074,10 +3099,10 @@ def get_today_appointments(doctor_id: int = None) -> List[Dict]:
 def get_appointment_stats(doctor_id: int = None, days: int = 30) -> Dict:
     with get_db() as conn:
         cursor = conn.cursor()
-        base = "WHERE DATE(a.appointment_date) >= DATE('now', ?)"
-        params = [f'-{days} days']
+        base = "WHERE DATE(a.appointment_date) >= CURRENT_DATE - %s * INTERVAL '1 day'"
+        params = [days]
         if doctor_id:
-            base += " AND a.doctor_id = ?"
+            base += " AND a.doctor_id = %s"
             params.append(doctor_id)
 
         cursor.execute(f"SELECT COUNT(*) as total FROM appointments a {base}", params)
@@ -3110,18 +3135,19 @@ def create_appointment(patient_id: int, doctor_id: int, clinic_id: int,
         cursor.execute("""
             INSERT INTO appointments (patient_id, doctor_id, clinic_id, service_id,
                                      appointment_date, appointment_time, duration_minutes, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (patient_id, doctor_id, clinic_id, service_id,
               appointment_date, appointment_time, duration_minutes,
               notes or reason))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def update_appointment_status(appointment_id: int, status: str) -> bool:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE appointments SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE appointments SET status = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
             (status, appointment_id)
         )
         return cursor.rowcount > 0
@@ -3137,8 +3163,8 @@ def get_patient_appointments(patient_id: int, limit: int = 20) -> List[Dict]:
             LEFT JOIN doctors d ON a.doctor_id = d.id
             LEFT JOIN clinic_services cs ON a.service_id = cs.id
             LEFT JOIN clinics c ON a.clinic_id = c.id
-            WHERE a.patient_id = ?
-            ORDER BY a.appointment_date DESC, a.appointment_time DESC LIMIT ?
+            WHERE a.patient_id = %s
+            ORDER BY a.appointment_date DESC, a.appointment_time DESC LIMIT %s
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -3154,20 +3180,20 @@ def get_doctor_patient_stories(doctor_id: int) -> List[Dict]:
         cursor.execute("""
             SELECT DISTINCT p.id as patient_id, p.name as patient_name,
                    (SELECT COUNT(*) FROM journal_entries je
-                    WHERE je.patient_id = p.id AND DATE(je.created_at) = DATE('now')) as today_entries,
+                    WHERE je.patient_id = p.id AND DATE(je.created_at) = CURRENT_DATE) as today_entries,
                    (SELECT je.entry_text FROM journal_entries je
-                    WHERE je.patient_id = p.id AND DATE(je.created_at) = DATE('now')
+                    WHERE je.patient_id = p.id AND DATE(je.created_at) = CURRENT_DATE
                     ORDER BY je.created_at DESC LIMIT 1) as latest_entry,
                    (SELECT je.mood FROM journal_entries je
-                    WHERE je.patient_id = p.id AND DATE(je.created_at) = DATE('now')
+                    WHERE je.patient_id = p.id AND DATE(je.created_at) = CURRENT_DATE
                     ORDER BY je.created_at DESC LIMIT 1) as latest_mood,
                    (SELECT COUNT(*) FROM doctor_notes dn
-                    WHERE dn.patient_id = p.id AND dn.doctor_id = ? AND DATE(dn.created_at) = DATE('now')) as viewed
+                    WHERE dn.patient_id = p.id AND dn.doctor_id = %s AND DATE(dn.created_at) = CURRENT_DATE) as viewed
             FROM patients p
-            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = ?
+            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = %s
             WHERE EXISTS (
                 SELECT 1 FROM journal_entries je
-                WHERE je.patient_id = p.id AND DATE(je.created_at) = DATE('now')
+                WHERE je.patient_id = p.id AND DATE(je.created_at) = CURRENT_DATE
             )
             ORDER BY p.name ASC
         """, (doctor_id, doctor_id))
@@ -3183,7 +3209,7 @@ def get_doctor_feed_summaries(doctor_id: int, limit: int = 50) -> List[Dict]:
                    p.date_of_birth
             FROM summaries s
             JOIN patients p ON s.patient_id = p.id
-            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = ?
+            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = %s
             ORDER BY p.name ASC, s.created_at DESC
         """, (doctor_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -3196,11 +3222,11 @@ def get_all_patients_for_doctor(doctor_id: int) -> List[Dict]:
         cursor.execute("""
             SELECT DISTINCT p.*,
                    (SELECT MAX(a2.appointment_date) FROM appointments a2
-                    WHERE a2.patient_id = p.id AND a2.doctor_id = ?) as last_visit,
+                    WHERE a2.patient_id = p.id AND a2.doctor_id = %s) as last_visit,
                    (SELECT COUNT(*) FROM summaries s WHERE s.patient_id = p.id) as summary_count,
                    (SELECT COUNT(*) FROM prescriptions pr WHERE pr.patient_id = p.id AND pr.status = 'active') as active_prescriptions
             FROM patients p
-            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = ?
+            JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = %s
             ORDER BY p.name ASC
         """, (doctor_id, doctor_id))
         return [dict(row) for row in cursor.fetchall()]
@@ -3217,7 +3243,7 @@ def get_clinic_admin_stats(clinic_id: int = None) -> Dict:
         # Today's intakes
         cursor.execute("""
             SELECT COUNT(*) as count FROM appointments
-            WHERE DATE(appointment_date) = DATE('now') AND status IN ('scheduled', 'completed')
+            WHERE DATE(appointment_date) = CURRENT_DATE AND status IN ('scheduled', 'completed')
         """)
         today_sessions = cursor.fetchone()['count']
 
@@ -3249,9 +3275,10 @@ def add_patient_update(patient_id: int, update_text: str = None, audio_url: str 
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO patient_updates (patient_id, update_text, audio_url, audio_duration, summary, questions)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (patient_id, update_text, audio_url, audio_duration, summary, questions))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_patient_updates(patient_id: int, limit: int = 50) -> list:
@@ -3259,8 +3286,8 @@ def get_patient_updates(patient_id: int, limit: int = 50) -> list:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM patient_updates WHERE patient_id = ?
-            ORDER BY created_at DESC LIMIT ?
+            SELECT * FROM patient_updates WHERE patient_id = %s
+            ORDER BY created_at DESC LIMIT %s
         """, (patient_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -3273,7 +3300,7 @@ def get_patient_update_by_id(update_id: int) -> dict:
             SELECT pu.*, p.name as patient_name
             FROM patient_updates pu
             JOIN patients p ON p.id = pu.patient_id
-            WHERE pu.id = ?
+            WHERE pu.id = %s
         """, (update_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -3288,12 +3315,12 @@ def get_patient_updates_for_doctor(doctor_id: int, days: int = 7, limit: int = 5
             FROM patient_updates pu
             JOIN patients p ON p.id = pu.patient_id
             WHERE pu.patient_id IN (
-                SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = ?
+                SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = %s
             )
-            AND pu.created_at >= datetime('now', ?)
+            AND pu.created_at >= NOW() - %s * INTERVAL '1 day'
             ORDER BY pu.created_at DESC
-            LIMIT ?
-        """, (doctor_id, f'-{days} days', limit))
+            LIMIT %s
+        """, (doctor_id, days, limit))
         return [dict(row) for row in cursor.fetchall()]
 
 
@@ -3305,9 +3332,10 @@ def add_doctor_reply(doctor_id: int, patient_id: int, update_id: int,
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO doctor_replies (doctor_id, patient_id, update_id, reply_text, audio_url, audio_duration)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (doctor_id, patient_id, update_id, reply_text, audio_url, audio_duration))
-        return cursor.lastrowid
+        return cursor.fetchone()['id']
 
 
 def get_replies_for_update(update_id: int) -> list:
@@ -3318,7 +3346,7 @@ def get_replies_for_update(update_id: int) -> list:
             SELECT dr.*, d.first_name || ' ' || d.last_name as doctor_name
             FROM doctor_replies dr
             JOIN doctors d ON d.id = dr.doctor_id
-            WHERE dr.update_id = ?
+            WHERE dr.update_id = %s
             ORDER BY dr.created_at ASC
         """, (update_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -3332,7 +3360,7 @@ def get_doctor_patient_communications(doctor_id: int, patient_id: int) -> list:
             SELECT dr.*, pu.update_text as original_update, pu.created_at as update_date
             FROM doctor_replies dr
             JOIN patient_updates pu ON pu.id = dr.update_id
-            WHERE dr.doctor_id = ? AND dr.patient_id = ?
+            WHERE dr.doctor_id = %s AND dr.patient_id = %s
             ORDER BY dr.created_at DESC
         """, (doctor_id, patient_id))
         return [dict(row) for row in cursor.fetchall()]
@@ -3348,7 +3376,7 @@ def get_doctor_replies_for_patient(patient_id: int) -> list:
             FROM doctor_replies dr
             JOIN doctors d ON d.id = dr.doctor_id
             JOIN patient_updates pu ON pu.id = dr.update_id
-            WHERE dr.patient_id = ?
+            WHERE dr.patient_id = %s
             ORDER BY dr.created_at DESC
         """, (patient_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -3367,23 +3395,23 @@ def search_doctors_advanced(query: str = None, specialty: str = None,
             conditions.append("d.accepting_patients = 1")
 
         if query:
-            conditions.append("(LOWER(d.first_name || ' ' || d.last_name) LIKE LOWER(?) OR LOWER(d.specialty) LIKE LOWER(?) OR LOWER(d.sub_specialty) LIKE LOWER(?))")
+            conditions.append("(LOWER(d.first_name || ' ' || d.last_name) LIKE LOWER(%s) OR LOWER(d.specialty) LIKE LOWER(%s) OR LOWER(d.sub_specialty) LIKE LOWER(%s))")
             params.extend([f"%{query}%", f"%{query}%", f"%{query}%"])
 
         if specialty:
-            conditions.append("LOWER(d.specialty) LIKE LOWER(?)")
+            conditions.append("LOWER(d.specialty) LIKE LOWER(%s)")
             params.append(f"%{specialty}%")
 
         if min_rating is not None:
-            conditions.append("d.rating >= ?")
+            conditions.append("d.rating >= %s")
             params.append(min_rating)
 
         if max_fee is not None:
-            conditions.append("d.consultation_fee <= ?")
+            conditions.append("d.consultation_fee <= %s")
             params.append(max_fee)
 
         if insurance:
-            conditions.append("LOWER(d.accepted_insurance) LIKE LOWER(?)")
+            conditions.append("LOWER(d.accepted_insurance) LIKE LOWER(%s)")
             params.append(f"%{insurance}%")
 
         where = " AND ".join(conditions)
@@ -3407,7 +3435,7 @@ def get_doctor_appointments_for_date(doctor_id: int, date: str) -> List[Dict]:
             SELECT a.*, p.name as patient_name
             FROM appointments a
             LEFT JOIN patients p ON a.patient_id = p.id
-            WHERE a.doctor_id = ? AND a.appointment_date = ?
+            WHERE a.doctor_id = %s AND a.appointment_date = %s
             AND a.status NOT IN ('cancelled')
             ORDER BY a.appointment_time ASC
         """, (doctor_id, date))
@@ -3447,13 +3475,13 @@ def update_appointment(appointment_id: int, **kwargs) -> bool:
         valid = ['appointment_date', 'appointment_time', 'duration_minutes', 'status', 'notes']
         for key, value in kwargs.items():
             if key in valid:
-                fields.append(f"{key} = ?")
+                fields.append(f"{key} = %s")
                 values.append(value)
         if not fields:
             return False
         fields.append("updated_at = CURRENT_TIMESTAMP")
         values.append(appointment_id)
-        cursor.execute(f"UPDATE appointments SET {', '.join(fields)} WHERE id = ?", values)
+        cursor.execute(f"UPDATE appointments SET {', '.join(fields)} WHERE id = %s", values)
         return cursor.rowcount > 0
 
 
@@ -3471,15 +3499,16 @@ def register_patient_full(name: str, username: str, password: str,
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO patients (name, username, password_hash, date_of_birth, email, phone, address, emergency_contact)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+         RETURNING id
         """, (name, username, password_hash, date_of_birth, email, phone, address, emergency_contact))
-        patient_id = cursor.lastrowid
+        patient_id = cursor.fetchone()['id']
 
         # Add insurance if provided
         if insurance_provider:
             cursor.execute("""
                 INSERT INTO insurance (patient_id, provider_name, policy_number, group_number)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
             """, (patient_id, insurance_provider, policy_number, group_number))
 
         return patient_id
