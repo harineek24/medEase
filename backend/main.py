@@ -28,13 +28,28 @@ from voice_service import voice_service, CONSULTATION_FIELDS, ConsultationConfig
 app = FastAPI(title="MedEase - EHR Summarizer API")
 
 # Configure CORS
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
+if os.getenv("FRONTEND_URL"):
+    allowed_origins.append(os.getenv("FRONTEND_URL"))
+
+from fastapi.middleware.cors import CORSMiddleware as _CORSMiddleware
+
+class VercelCORSMiddleware(_CORSMiddleware):
+    """Extends CORS to allow Vercel preview deployment URLs."""
+    def is_allowed_origin(self, origin: str) -> bool:
+        if super().is_allowed_origin(origin):
+            return True
+        # Allow all Vercel preview deployments for this project
+        if origin and ("vercel.app" in origin):
+            return True
+        return False
+
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        os.getenv("FRONTEND_URL", ""),
-    ],
+    VercelCORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
