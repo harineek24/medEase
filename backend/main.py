@@ -13,6 +13,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+# Load environment variables BEFORE importing modules that read them
+load_dotenv()
+
 # Import medication analyzer
 from medication_analyzer import analyzer
 
@@ -20,9 +23,6 @@ from medication_analyzer import analyzer
 import medatabase as db
 from chat_handler import patient_chat, general_chat, check_quick_response, doctor_consultation, generate_consultation_summary
 from voice_service import voice_service, CONSULTATION_FIELDS, ConsultationConfig, DEFAULT_CONSULTATION_FIELDS, AVAILABLE_VOICES
-
-# Load environment variables
-load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI(title="MedEase - EHR Summarizer API")
