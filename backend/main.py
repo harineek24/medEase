@@ -13,24 +13,43 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+# Load environment variables BEFORE importing modules that read them
+load_dotenv()
+
 # Import medication analyzer
 from medication_analyzer import analyzer
 
 # Import database and chat handlers
-import database as db
+import medatabase as db
 from chat_handler import patient_chat, general_chat, check_quick_response, doctor_consultation, generate_consultation_summary
 from voice_service import voice_service, CONSULTATION_FIELDS, ConsultationConfig, DEFAULT_CONSULTATION_FIELDS, AVAILABLE_VOICES
-
-# Load environment variables
-load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI(title="MedEase - EHR Summarizer API")
 
 # Configure CORS
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
+if os.getenv("FRONTEND_URL"):
+    allowed_origins.append(os.getenv("FRONTEND_URL"))
+
+from fastapi.middleware.cors import CORSMiddleware as _CORSMiddleware
+
+class VercelCORSMiddleware(_CORSMiddleware):
+    """Extends CORS to allow Vercel preview deployment URLs."""
+    def is_allowed_origin(self, origin: str) -> bool:
+        if super().is_allowed_origin(origin):
+            return True
+        # Allow all Vercel preview deployments for this project
+        if origin and ("vercel.app" in origin):
+            return True
+        return False
+
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    VercelCORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

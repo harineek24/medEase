@@ -4,7 +4,7 @@
   "installCommand": "cd frontend && npm install",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://your-backend-url.com/api/$1" },
+    { "source": "/api/(.*)", "destination": "https://medease-nb52.onrender.com/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
