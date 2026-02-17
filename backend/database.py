@@ -11,10 +11,12 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 
+# Database connection URL from environment
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
 
 def get_connection():
     """Get a database connection with RealDictCursor for dict-like access."""
-    DATABASE_URL = os.environ.get("DATABASE_URL", "")
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
@@ -477,7 +479,7 @@ def init_database():
                 insurance_id INTEGER,
                 payer_name TEXT,
                 status TEXT DEFAULT 'pending',
-                is_eligible INTEGER,
+                is_eligible BOOLEAN,
                 coverage_type TEXT,
                 copay REAL,
                 deductible REAL,
@@ -599,7 +601,7 @@ def init_database():
 
 
 def _migrate_doctors_table(cursor):
-    """Add new columns to doctors table if they don't exist."""
+    """Add new columns to doctors table if they don't exist (PostgreSQL-safe)."""
     new_columns = [
         ("consultation_fee", "REAL DEFAULT 150"),
         ("rating", "REAL DEFAULT 4.5"),
@@ -981,7 +983,7 @@ def _seed_sample_data(cursor):
 
     for pt in other_patients:
         cursor.execute(
-            "INSERT INTO patients (name, date_of_birth) VALUES (%s, %s) RETURNING id",
+            "INSERT INTO patients (name, date_of_birth) VALUES (%s, %s)",
             (pt["name"], pt["date_of_birth"])
         )
 
@@ -1532,7 +1534,7 @@ def add_medication(
             INSERT INTO medications
             (summary_id, name, dosage, frequency, purpose, rxcui, drug_class)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (summary_id, name, dosage, frequency, purpose, rxcui, drug_class))
         return cursor.fetchone()['id']
 
@@ -1598,7 +1600,7 @@ def add_test_result(
             INSERT INTO test_results
             (summary_id, test_name, value, unit, reference_range, status)
             VALUES (%s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (summary_id, test_name, value, unit, reference_range, status))
         return cursor.fetchone()['id']
 
@@ -1624,8 +1626,7 @@ def get_all_test_names() -> list:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT DISTINCT ON (LOWER(test_name)) test_name, status,
-                   created_at as latest_at
+            SELECT DISTINCT ON (LOWER(test_name)) test_name, status, created_at as latest_at
             FROM test_results
             ORDER BY LOWER(test_name), created_at DESC
         """)
@@ -1651,7 +1652,7 @@ def add_drug_interaction(
             INSERT INTO drug_interactions
             (summary_id, drug1, drug2, severity, description, recommendation)
             VALUES (%s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (summary_id, drug1, drug2, severity, description, recommendation))
         return cursor.fetchone()['id']
 
@@ -1675,7 +1676,7 @@ def save_chat_message(
             INSERT INTO chat_messages
             (session_id, chat_type, patient_id, summary_id, role, content)
             VALUES (%s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (session_id, chat_type, patient_id, summary_id, role, content))
         return cursor.fetchone()['id']
 
@@ -1801,7 +1802,7 @@ def create_consultation_session(session_id: str, patient_id: Optional[int] = Non
         cursor.execute("""
             INSERT INTO consultation_sessions (session_id, patient_id)
             VALUES (%s, %s)
-         RETURNING id
+            RETURNING id
         """, (session_id, patient_id))
         return cursor.fetchone()['id']
 
@@ -1888,8 +1889,8 @@ def save_consultation_field(
                 INSERT INTO consultation_fields
                 (session_id, field_name, field_label, field_value, confirmed)
                 VALUES (%s, %s, %s, %s, %s)
-             RETURNING id
-        """, (session_id, field_name, field_label, field_value, confirmed))
+                RETURNING id
+            """, (session_id, field_name, field_label, field_value, confirmed))
             return cursor.fetchone()['id']
 
 
@@ -1956,7 +1957,7 @@ def get_consultations_for_doctor_today(doctor_id: int) -> list:
                 SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = %s
             )
             AND cs.status = 'completed'
-            AND date(cs.completed_at) = CURRENT_DATE
+            AND DATE(cs.completed_at) = CURRENT_DATE
             ORDER BY cs.completed_at DESC
         """, (doctor_id,))
         sessions = [dict(row) for row in cursor.fetchall()]
@@ -1991,7 +1992,7 @@ def get_all_clinics(active_only: bool = True) -> List[Dict]:
         cursor = conn.cursor()
         query = "SELECT * FROM clinics"
         if active_only:
-            query += " WHERE is_active = 1"
+            query += " WHERE is_active = TRUE"
         query += " ORDER BY name"
         cursor.execute(query)
         return [dict(row) for row in cursor.fetchall()]
@@ -2010,14 +2011,14 @@ def get_clinic(clinic_id: int) -> Optional[Dict]:
 
         # Get doctors
         cursor.execute("""
-            SELECT * FROM doctors WHERE clinic_id = %s AND is_active = 1
+            SELECT * FROM doctors WHERE clinic_id = %s AND is_active = TRUE
             ORDER BY last_name
         """, (clinic_id,))
         clinic_dict['doctors'] = [dict(row) for row in cursor.fetchall()]
 
         # Get services
         cursor.execute("""
-            SELECT * FROM clinic_services WHERE clinic_id = %s AND is_active = 1
+            SELECT * FROM clinic_services WHERE clinic_id = %s AND is_active = TRUE
             ORDER BY category, service_name
         """, (clinic_id,))
         clinic_dict['services'] = [dict(row) for row in cursor.fetchall()]
@@ -2043,7 +2044,7 @@ def create_clinic(
         cursor.execute("""
             INSERT INTO clinics (name, address, city, state, zip_code, phone, email, website, description, operating_hours)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (name, address, city, state, zip_code, phone, email, website, description, operating_hours))
         return cursor.fetchone()['id']
 
@@ -2089,7 +2090,7 @@ def get_all_doctors(active_only: bool = True) -> List[Dict]:
             LEFT JOIN clinics c ON d.clinic_id = c.id
         """
         if active_only:
-            query += " WHERE d.is_active = 1"
+            query += " WHERE d.is_active = TRUE"
         query += " ORDER BY d.last_name, d.first_name"
         cursor.execute(query)
         return [dict(row) for row in cursor.fetchall()]
@@ -2114,7 +2115,7 @@ def get_doctors_by_clinic(clinic_id: int) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM doctors WHERE clinic_id = %s AND is_active = 1
+            SELECT * FROM doctors WHERE clinic_id = %s AND is_active = TRUE
             ORDER BY last_name, first_name
         """, (clinic_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -2128,7 +2129,7 @@ def get_doctors_by_specialty(specialty: str) -> List[Dict]:
             SELECT d.*, c.name as clinic_name
             FROM doctors d
             LEFT JOIN clinics c ON d.clinic_id = c.id
-            WHERE LOWER(d.specialty) LIKE LOWER(%s) AND d.is_active = 1
+            WHERE LOWER(d.specialty) LIKE LOWER(%s) AND d.is_active = TRUE
             ORDER BY d.last_name
         """, (f"%{specialty}%",))
         return [dict(row) for row in cursor.fetchall()]
@@ -2205,7 +2206,7 @@ def get_clinic_services(clinic_id: int) -> List[Dict]:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM clinic_services
-            WHERE clinic_id = %s AND is_active = 1
+            WHERE clinic_id = %s AND is_active = TRUE
             ORDER BY category, service_name
         """, (clinic_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -2225,7 +2226,7 @@ def create_clinic_service(
         cursor.execute("""
             INSERT INTO clinic_services (clinic_id, service_name, description, category, duration_minutes, price)
             VALUES (%s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (clinic_id, service_name, description, category, duration_minutes, price))
         return cursor.fetchone()['id']
 
@@ -2244,7 +2245,7 @@ def verify_admin_login(username: str, password: str) -> Optional[Dict]:
         cursor.execute("""
             SELECT id, username, email, role, clinic_id
             FROM admin_users
-            WHERE username = %s AND password_hash = %s AND is_active = 1
+            WHERE username = %s AND password_hash = %s AND is_active = TRUE
         """, (username, password_hash))
         user = cursor.fetchone()
 
@@ -2268,7 +2269,7 @@ def verify_patient_login(username: str, password: str) -> Optional[Dict]:
         cursor.execute("""
             SELECT id, name, username, email, date_of_birth
             FROM patients
-            WHERE username = %s AND password_hash = %s AND is_active = 1
+            WHERE username = %s AND password_hash = %s AND is_active = TRUE
         """, (username, password_hash))
         user = cursor.fetchone()
         return dict(user) if user else None
@@ -2286,7 +2287,7 @@ def register_patient(name: str, username: str, password: str,
         cursor.execute("""
             INSERT INTO patients (name, username, password_hash, date_of_birth, email, phone, address)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (name, username, password_hash, date_of_birth, email, phone, address))
         return cursor.fetchone()['id']
 
@@ -2345,7 +2346,7 @@ def get_consultation_config(config_id: str) -> Optional[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM consultation_configs WHERE config_id = %s AND is_active = 1",
+            "SELECT * FROM consultation_configs WHERE config_id = %s AND is_active = TRUE",
             (config_id,)
         )
         row = cursor.fetchone()
@@ -2364,12 +2365,12 @@ def get_all_consultation_configs(clinic_id: Optional[int] = None) -> List[Dict]:
         cursor = conn.cursor()
         if clinic_id:
             cursor.execute(
-                "SELECT * FROM consultation_configs WHERE clinic_id = %s AND is_active = 1 ORDER BY name",
+                "SELECT * FROM consultation_configs WHERE clinic_id = %s AND is_active = TRUE ORDER BY name",
                 (clinic_id,)
             )
         else:
             cursor.execute(
-                "SELECT * FROM consultation_configs WHERE is_active = 1 ORDER BY name"
+                "SELECT * FROM consultation_configs WHERE is_active = TRUE ORDER BY name"
             )
         configs = []
         for row in cursor.fetchall():
@@ -2418,7 +2419,7 @@ def delete_consultation_config(config_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE consultation_configs SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE config_id = %s",
+            "UPDATE consultation_configs SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE config_id = %s",
             (config_id,)
         )
         return cursor.rowcount > 0
@@ -2472,7 +2473,7 @@ def create_doctor_note(doctor_id: int, patient_id: int, content: str = None,
         cursor.execute("""
             INSERT INTO doctor_notes (doctor_id, patient_id, note_type, content, audio_url)
             VALUES (%s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (doctor_id, patient_id, note_type, content, audio_url))
         return cursor.fetchone()['id']
 
@@ -2509,7 +2510,7 @@ def mark_notes_read(patient_id: int):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE doctor_notes SET is_read = 1 WHERE patient_id = %s AND is_read = 0",
+            "UPDATE doctor_notes SET is_read = TRUE WHERE patient_id = %s AND is_read = FALSE",
             (patient_id,)
         )
 
@@ -2518,7 +2519,7 @@ def get_unread_notes_count(patient_id: int) -> int:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT COUNT(*) as count FROM doctor_notes WHERE patient_id = %s AND is_read = 0",
+            "SELECT COUNT(*) as count FROM doctor_notes WHERE patient_id = %s AND is_read = FALSE",
             (patient_id,)
         )
         return cursor.fetchone()['count']
@@ -2535,7 +2536,7 @@ def create_journal_entry(patient_id: int, entry_text: str = None, mood: str = No
         cursor.execute("""
             INSERT INTO journal_entries (patient_id, entry_text, mood, pain_level, symptoms)
             VALUES (%s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (patient_id, entry_text, mood, pain_level, symptoms))
         return cursor.fetchone()['id']
 
@@ -2646,7 +2647,7 @@ def add_insurance(patient_id: int, provider_name: str, policy_number: str = None
         cursor.execute("""
             INSERT INTO insurance (patient_id, provider_name, policy_number, group_number, copay, deductible)
             VALUES (%s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (patient_id, provider_name, policy_number, group_number, copay, deductible))
         return cursor.fetchone()['id']
 
@@ -2939,9 +2940,10 @@ def create_statement(patient_id: int, total_amount: float, line_items: str = Non
         cursor.execute("""
             INSERT INTO statements (patient_id, statement_number, total_amount, amount_due, line_items, due_date)
             VALUES (%s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (patient_id, stmt_number, total_amount, total_amount, line_items, due_date))
-        return {"id": cursor.fetchone()['id'], "statement_number": stmt_number}
+        stmt_id = cursor.fetchone()['id']
+        return {"id": stmt_id, "statement_number": stmt_number}
 
 
 def get_patient_statements(patient_id: int, limit: int = 50) -> List[Dict]:
@@ -3276,7 +3278,7 @@ def add_patient_update(patient_id: int, update_text: str = None, audio_url: str 
         cursor.execute("""
             INSERT INTO patient_updates (patient_id, update_text, audio_url, audio_duration, summary, questions)
             VALUES (%s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (patient_id, update_text, audio_url, audio_duration, summary, questions))
         return cursor.fetchone()['id']
 
@@ -3333,7 +3335,7 @@ def add_doctor_reply(doctor_id: int, patient_id: int, update_id: int,
         cursor.execute("""
             INSERT INTO doctor_replies (doctor_id, patient_id, update_id, reply_text, audio_url, audio_duration)
             VALUES (%s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (doctor_id, patient_id, update_id, reply_text, audio_url, audio_duration))
         return cursor.fetchone()['id']
 
@@ -3388,11 +3390,11 @@ def search_doctors_advanced(query: str = None, specialty: str = None,
     """Advanced doctor search with multiple filters."""
     with get_db() as conn:
         cursor = conn.cursor()
-        conditions = ["d.is_active = 1"]
+        conditions = ["d.is_active = TRUE"]
         params = []
 
         if accepting_only:
-            conditions.append("d.accepting_patients = 1")
+            conditions.append("d.accepting_patients = TRUE")
 
         if query:
             conditions.append("(LOWER(d.first_name || ' ' || d.last_name) LIKE LOWER(%s) OR LOWER(d.specialty) LIKE LOWER(%s) OR LOWER(d.sub_specialty) LIKE LOWER(%s))")
@@ -3446,7 +3448,7 @@ def get_all_specialties() -> List[str]:
     """Get all unique specialties from doctors."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT specialty FROM doctors WHERE is_active = 1 AND specialty IS NOT NULL ORDER BY specialty")
+        cursor.execute("SELECT DISTINCT specialty FROM doctors WHERE is_active = TRUE AND specialty IS NOT NULL ORDER BY specialty")
         return [row['specialty'] for row in cursor.fetchall()]
 
 
@@ -3454,7 +3456,7 @@ def get_all_insurance_providers() -> List[str]:
     """Get all unique insurance providers accepted by doctors."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT accepted_insurance FROM doctors WHERE is_active = 1 AND accepted_insurance != ''")
+        cursor.execute("SELECT DISTINCT accepted_insurance FROM doctors WHERE is_active = TRUE AND accepted_insurance != ''")
         providers = set()
         for row in cursor.fetchall():
             for p in row['accepted_insurance'].split(','):
@@ -3500,7 +3502,7 @@ def register_patient_full(name: str, username: str, password: str,
         cursor.execute("""
             INSERT INTO patients (name, username, password_hash, date_of_birth, email, phone, address, emergency_contact)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-         RETURNING id
+            RETURNING id
         """, (name, username, password_hash, date_of_birth, email, phone, address, emergency_contact))
         patient_id = cursor.fetchone()['id']
 
