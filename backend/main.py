@@ -2,7 +2,8 @@ import os
 import base64
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, date
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -24,8 +25,25 @@ import medatabase as db
 from chat_handler import patient_chat, general_chat, check_quick_response, doctor_consultation, generate_consultation_summary
 from voice_service import voice_service, CONSULTATION_FIELDS, ConsultationConfig, DEFAULT_CONSULTATION_FIELDS, AVAILABLE_VOICES
 
+# Custom JSON encoder for PostgreSQL types (datetime, Decimal, etc.)
+class DBJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, date):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
+
+
+class DBJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return json.dumps(content, cls=DBJSONEncoder).encode("utf-8")
+
+
 # Initialize FastAPI app
-app = FastAPI(title="MedEase - EHR Summarizer API")
+app = FastAPI(title="MedEase - EHR Summarizer API", default_response_class=DBJSONResponse)
 
 # Configure CORS
 allowed_origins = [
