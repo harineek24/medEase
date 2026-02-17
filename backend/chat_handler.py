@@ -11,7 +11,7 @@ from datetime import datetime
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-import database as db
+import medatabase as db
 
 # Load environment variables
 load_dotenv()
