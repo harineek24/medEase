@@ -614,15 +614,12 @@ def _migrate_doctors_table(cursor):
         ("accepted_insurance", "TEXT DEFAULT ''"),
     ]
     for col_name, col_type in new_columns:
+        cursor.execute("SAVEPOINT sp_migrate")
         try:
             cursor.execute(f"ALTER TABLE doctors ADD COLUMN {col_name} {col_type}")
+            cursor.execute("RELEASE SAVEPOINT sp_migrate")
         except Exception:
-            # Column already exists – rollback the failed statement
-            cursor.execute("SAVEPOINT sp_migrate")
-            try:
-                cursor.execute(f"ALTER TABLE doctors ADD COLUMN {col_name} {col_type}")
-            except Exception:
-                cursor.execute("ROLLBACK TO SAVEPOINT sp_migrate")
+            cursor.execute("ROLLBACK TO SAVEPOINT sp_migrate")
 
 
 def _ensure_doctor_extras(cursor):
