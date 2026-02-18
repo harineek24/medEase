@@ -2919,8 +2919,8 @@ def get_today_appointments(doctor_id: int = None) -> List[Dict]:
 def get_appointment_stats(doctor_id: int = None, days: int = 30) -> Dict:
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        base = "WHERE DATE(a.appointment_date) >= CURRENT_DATE - INTERVAL '%s days'"
-        params = [days]
+        base = "WHERE DATE(a.appointment_date) >= CURRENT_DATE - (%s || ' days')::INTERVAL"
+        params = [str(days)]
         if doctor_id:
             base += " AND a.doctor_id = %s"
             params.append(doctor_id)
@@ -3137,7 +3137,7 @@ def get_patient_updates_for_doctor(doctor_id: int, days: int = 7, limit: int = 5
             WHERE pu.patient_id IN (
                 SELECT DISTINCT a.patient_id FROM appointments a WHERE a.doctor_id = %s
             )
-            AND pu.created_at >= CURRENT_TIMESTAMP - INTERVAL '%s days'
+            AND pu.created_at >= CURRENT_TIMESTAMP - (%s || ' days')::INTERVAL
             ORDER BY pu.created_at DESC
             LIMIT %s
         """, (doctor_id, days, limit))

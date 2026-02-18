@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any
 import google.generativeai as genai
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse as _OrigJSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -37,13 +37,14 @@ class DBJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-class DBJSONResponse(JSONResponse):
+class JSONResponse(_OrigJSONResponse):
+    """JSONResponse that handles PostgreSQL types (datetime, Decimal)."""
     def render(self, content) -> bytes:
         return json.dumps(content, cls=DBJSONEncoder).encode("utf-8")
 
 
 # Initialize FastAPI app
-app = FastAPI(title="MedEase - EHR Summarizer API", default_response_class=DBJSONResponse)
+app = FastAPI(title="MedEase - EHR Summarizer API", default_response_class=JSONResponse)
 
 # Configure CORS
 allowed_origins = [
@@ -2989,7 +2990,7 @@ async def clinicadmin_create_doctor(request: CreateDoctorRequest):
 async def clinicadmin_update_doctor(doctor_id: int, request: CreateDoctorRequest):
     """Update an existing doctor."""
     try:
-        updates = {k: v for k, v in request.dict().items() if v is not None}
+        updates = {k: v for k, v in request.model_dump().items() if v is not None}
         success = db.update_doctor(doctor_id, **updates)
         if not success:
             raise HTTPException(status_code=404, detail="Doctor not found")
