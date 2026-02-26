@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ShieldCheck,
   Stethoscope,
@@ -24,9 +24,23 @@ interface DoctorOption {
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { login, isAuthenticated, role } = useAuth()
 
   const [selectedRole, setSelectedRole] = useState<RoleCard | null>(null)
+
+  // Forgot / Reset password state
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotLoading, setForgotLoading] = useState(false)
+  const [forgotMessage, setForgotMessage] = useState('')
+
+  const resetToken = searchParams.get('reset')
+  const [resetNewPassword, setResetNewPassword] = useState('')
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('')
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetMessage, setResetMessage] = useState('')
+  const [resetError, setResetError] = useState('')
 
   // Admin form state
   const [adminUsername, setAdminUsername] = useState('')
@@ -154,6 +168,62 @@ export default function LoginPage() {
     }
   }
 
+  // Forgot password handler
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setForgotLoading(true)
+    setForgotMessage('')
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/patient/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail }),
+      })
+      const data = await res.json()
+      setForgotMessage(data.message || 'If an account with that email exists, a reset link has been sent.')
+    } catch {
+      setForgotMessage('If an account with that email exists, a reset link has been sent.')
+    } finally {
+      setForgotLoading(false)
+    }
+  }
+
+  // Reset password handler
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setResetError('')
+    setResetMessage('')
+
+    if (resetNewPassword.length < 6) {
+      setResetError('Password must be at least 6 characters')
+      return
+    }
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetError('Passwords do not match')
+      return
+    }
+
+    setResetLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/patient/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: resetToken, new_password: resetNewPassword }),
+      })
+      if (res.ok) {
+        setResetMessage('Password has been reset. You can now log in.')
+        setSearchParams({})
+      } else {
+        const data = await res.json()
+        setResetError(data.detail || 'Invalid or expired reset link.')
+      }
+    } catch {
+      setResetError('Something went wrong. Please try again.')
+    } finally {
+      setResetLoading(false)
+    }
+  }
+
   const roles = [
     {
       key: 'clinicadmin' as RoleCard,
@@ -195,6 +265,60 @@ export default function LoginPage() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-12">
+        {/* Password Reset Form (from email link) */}
+        {resetToken ? (
+          <div className="w-full max-w-md">
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Reset Your Password</h3>
+              {resetMessage ? (
+                <div className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 mb-4">{resetMessage}</div>
+              ) : (
+                <form onSubmit={handleResetPassword} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                    <input
+                      type="password"
+                      value={resetNewPassword}
+                      onChange={(e) => setResetNewPassword(e.target.value)}
+                      required
+                      minLength={6}
+                      placeholder="At least 6 characters"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                    <input
+                      type="password"
+                      value={resetConfirmPassword}
+                      onChange={(e) => setResetConfirmPassword(e.target.value)}
+                      required
+                      placeholder="Re-enter your password"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all"
+                    />
+                  </div>
+                  {resetError && (
+                    <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{resetError}</p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={resetLoading}
+                    className="w-full px-4 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] disabled:opacity-50 text-white font-medium rounded-lg transition-colors text-sm"
+                  >
+                    {resetLoading ? 'Resetting...' : 'Reset Password'}
+                  </button>
+                </form>
+              )}
+              <button
+                onClick={() => setSearchParams({})}
+                className="w-full mt-3 text-sm text-[#45BFD3] hover:underline text-center"
+              >
+                Back to login
+              </button>
+            </div>
+          </div>
+        ) : (
+        <>
         <div className="text-center mb-10">
           <h1 className="text-3xl md:text-4xl font-light tracking-tight text-gray-900 mb-3">
             Welcome to MedEase
@@ -424,15 +548,58 @@ export default function LoginPage() {
                   {patientLoading ? 'Signing in...' : 'Sign In'}
                 </button>
               </form>
-              <p className="text-xs text-gray-400 mt-3 text-center">
-                Default: maria / patient123
-              </p>
-              <p className="text-xs text-gray-400 mt-1 text-center">
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="w-full mt-3 text-sm text-[#45BFD3] hover:underline text-center"
+              >
+                Forgot password?
+              </button>
+              <p className="text-xs text-gray-400 mt-2 text-center">
                 Your clinic admin will provide your login credentials.
               </p>
             </div>
           )}
+
+          {/* Forgot Password Form */}
+          {selectedRole === 'patient' && showForgotPassword && (
+            <div className="mt-4 bg-white rounded-2xl border border-gray-100 shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h3 className="text-base font-medium text-gray-900 mb-3">Reset Password</h3>
+              {forgotMessage ? (
+                <div className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 mb-3">{forgotMessage}</div>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
+                    <input
+                      type="email"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      required
+                      placeholder="Enter your email"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading || !forgotEmail}
+                    className="w-full px-4 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] disabled:opacity-50 text-white font-medium rounded-lg transition-colors text-sm"
+                  >
+                    {forgotLoading ? 'Sending...' : 'Send Reset Link'}
+                  </button>
+                </form>
+              )}
+              <button
+                onClick={() => { setShowForgotPassword(false); setForgotMessage('') }}
+                className="w-full mt-2 text-sm text-gray-400 hover:text-gray-600 text-center"
+              >
+                Back to login
+              </button>
+            </div>
+          )}
         </div>
+        </>
+        )}
       </main>
 
       {/* Footer */}

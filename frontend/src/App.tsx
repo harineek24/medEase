@@ -5,7 +5,6 @@ import './App.css'
 
 // Import components
 import PatientChat from './components/PatientChat'
-import GeneralChat from './components/GeneralChat'
 import HealthHistory from './components/patient/HealthHistory'
 import PatientUpdates from './components/patient/PatientUpdates'
 import AppointmentBooking from './components/patient/AppointmentBooking'
@@ -25,7 +24,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 type AppState = 'upload' | 'processing' | 'results'
 
 // Extended view type that includes the new patient-portal views
-export type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'appointments' | 'mystatements' | 'mypayments' | 'myinsurance'
+export type PatientView = 'upload' | 'dashboard' | 'history' | 'consult' | 'config' | 'updates' | 'appointments' | 'mystatements' | 'mypayments' | 'myinsurance'
 
 interface SummaryData {
   summary: string
@@ -118,6 +117,7 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
   const [filteredSummary, setFilteredSummary] = useState<string>('')
   const [interactions, setInteractions] = useState<DrugInteraction[]>([])
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [newCredentials, setNewCredentials] = useState<{username: string; password: string} | null>(null)
 
   // Health dashboard chart state
   const [selectedHealthCard, setSelectedHealthCard] = useState<string | null>(null)
@@ -260,7 +260,11 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
       })
 
       if (response.ok) {
+        const data = await response.json()
         setSaveStatus('saved')
+        if (data.credentials) {
+          setNewCredentials(data.credentials)
+        }
         setTimeout(() => setSaveStatus('idle'), 3000)
       } else {
         setSaveStatus('error')
@@ -743,9 +747,6 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
       case 'history':
         return <HealthHistory onNavigate={(v) => onNavigate(v as PatientView)} />
 
-      case 'chat':
-        return <GeneralChat />
-
       case 'consult':
         return <VoiceConsult />
 
@@ -957,6 +958,42 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
               />
             </div>
           </div>
+
+          {/* New patient credentials banner */}
+          {newCredentials && (
+            <div className="credentials-banner" style={{
+              margin: '16px 0', padding: '16px 20px', borderRadius: '12px',
+              background: '#f0fdf4', border: '1px solid #bbf7d0',
+              display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap'
+            }}>
+              <div style={{ flex: 1, minWidth: '200px' }}>
+                <strong style={{ color: '#166534' }}>Patient portal account created</strong>
+                <div style={{ marginTop: '6px', fontFamily: 'monospace', fontSize: '13px', color: '#374151' }}>
+                  Username: <strong>{newCredentials.username}</strong> &nbsp;|&nbsp; Password: <strong>{newCredentials.password}</strong>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`Username: ${newCredentials.username}\nPassword: ${newCredentials.password}`)
+                }}
+                style={{
+                  padding: '6px 14px', borderRadius: '8px', border: '1px solid #d1d5db',
+                  background: 'white', cursor: 'pointer', fontSize: '13px'
+                }}
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => setNewCredentials(null)}
+                style={{
+                  padding: '6px 10px', borderRadius: '8px', border: 'none',
+                  background: 'transparent', cursor: 'pointer', fontSize: '16px', color: '#9ca3af'
+                }}
+              >
+                &times;
+              </button>
+            </div>
+          )}
 
           <div className="disclaimer">
             <strong>Medical Disclaimer:</strong> This summary is AI-generated and for informational purposes only.

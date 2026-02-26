@@ -3348,5 +3348,94 @@ def register_patient_full(name: str, username: str, password: str,
         return patient_id
 
 
+# =============================================================================
+# Password Management
+# =============================================================================
+
+def change_patient_password(patient_id: int, old_password: str, new_password: str) -> bool:
+    """Change a patient's password. Returns True if successful."""
+    import hashlib
+    old_hash = hashlib.sha256(old_password.encode()).hexdigest()
+    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            "SELECT id FROM patients WHERE id = %s AND password_hash = %s",
+            (patient_id, old_hash)
+        )
+        if not cursor.fetchone():
+            return False
+        cursor.execute(
+            "UPDATE patients SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+            (new_hash, patient_id)
+        )
+        return True
+
+
+def create_password_reset_token(email: str) -> Optional[str]:
+    """Create a password reset token for a patient. Returns token or None if email not found."""
+    import secrets
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT id FROM patients WHERE LOWER(email) = LOWER(%s) AND is_active = TRUE", (email,))
+        patient = cursor.fetchone()
+        if not patient:
+            return None
+
+        token = secrets.token_urlsafe(32)
+        # Store token with 1-hour expiry
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id SERIAL PRIMARY KEY,
+                patient_id INTEGER NOT NULL REFERENCES patients(id),
+                token TEXT NOT NULL UNIQUE,
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO password_reset_tokens (patient_id, token, expires_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP + INTERVAL '1 hour')
+        """, (patient['id'], token))
+        return token
+
+
+def reset_password_with_token(token: str, new_password: str) -> bool:
+    """Reset a patient's password using a valid token. Returns True if successful."""
+    import hashlib
+    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            SELECT patient_id FROM password_reset_tokens
+            WHERE token = %s AND used = FALSE AND expires_at > CURRENT_TIMESTAMP
+        """, (token,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        cursor.execute(
+            "UPDATE patients SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+            (new_hash, row['patient_id'])
+        )
+        cursor.execute(
+            "UPDATE password_reset_tokens SET used = TRUE WHERE token = %s",
+            (token,)
+        )
+        return True
+
+
+def get_patient_email(patient_id: int) -> Optional[str]:
+    """Get a patient's email by ID."""
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT email FROM patients WHERE id = %s", (patient_id,))
+        row = cursor.fetchone()
+        return row['email'] if row and row['email'] else None
+
+
 # Initialize database on module import
 init_database()

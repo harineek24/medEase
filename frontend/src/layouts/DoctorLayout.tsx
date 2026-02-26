@@ -6,6 +6,7 @@ import {
   Stethoscope,
   Clock,
   Calendar,
+  MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -13,6 +14,7 @@ import { useAuth } from '@/contexts/AuthContext'
 const navItems = [
   { to: '/doctor',               icon: Newspaper,  label: 'Feed',           end: true },
   { to: '/doctor/history',       icon: Clock,      label: 'History',        end: false },
+  { to: '/doctor/chat',          icon: MessageSquare, label: 'AI Chat',     end: false },
   { to: '/doctor/calendar',      icon: Calendar,   label: 'Calendar',       end: false },
   { to: '/doctor/consultconfig', icon: Settings,   label: 'Consult Config', end: false },
 ]
