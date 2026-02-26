@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Loader2, AlertCircle, RefreshCw, DollarSign } from "lucide-react";
 
-const API = "http://localhost:8000";
+import { API_BASE_URL as API } from "@/api";
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
