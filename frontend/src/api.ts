@@ -1,10 +1,20 @@
 // API configuration for MedEase
-// Uses environment variable in production, localhost in development
+// In development, Vite proxy forwards /api to localhost:8000 (see vite.config.ts)
+// In production, Vercel rewrites /api to the Render backend (see vercel.json)
+// Only set VITE_API_URL if you need to bypass the proxy/rewrite (e.g. direct backend access)
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
+// WebSocket requires absolute URLs. When API_BASE_URL is relative (empty),
+// derive from window.location so Vite proxy handles it in dev.
+// In production on Vercel, set VITE_WS_URL to point directly to the backend
+// since Vercel does not support WebSocket proxying.
 export const WS_BASE_URL = import.meta.env.VITE_WS_URL ||
-  (API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://'));
+  (API_BASE_URL
+    ? API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://')
+    : (typeof window !== 'undefined'
+        ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+        : ''));
 
 // API endpoints
 export const endpoints = {
