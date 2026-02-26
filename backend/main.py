@@ -1923,6 +1923,128 @@ async def reset_password(request: ResetPasswordRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =============================================================================
+# Doctor Authentication
+# =============================================================================
+
+class DoctorLoginRequest(BaseModel):
+    username: str
+    password: str
+    clinic_id: Optional[int] = None
+
+
+@app.post("/api/doctor/login")
+async def doctor_login(request: DoctorLoginRequest):
+    """Doctor login endpoint."""
+    try:
+        user = db.verify_doctor_login(request.username, request.password, request.clinic_id)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+
+        return JSONResponse(content={
+            "success": True,
+            "user": user,
+            "message": "Login successful"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DoctorChangePasswordRequest(BaseModel):
+    doctor_id: int
+    old_password: str
+    new_password: str
+
+
+@app.post("/api/doctor/change-password")
+async def doctor_change_password(request: DoctorChangePasswordRequest):
+    """Change a doctor's password (requires current password)."""
+    try:
+        if len(request.new_password) < 6:
+            raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+        success = db.change_doctor_password(request.doctor_id, request.old_password, request.new_password)
+        if not success:
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+        return JSONResponse(content={"success": True, "message": "Password changed successfully"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DoctorForgotPasswordRequest(BaseModel):
+    email: str
+
+
+@app.post("/api/doctor/forgot-password")
+async def doctor_forgot_password(request: DoctorForgotPasswordRequest):
+    """Send a password reset email for a doctor. Always returns success to prevent email enumeration."""
+    try:
+        token = db.create_doctor_reset_token(request.email)
+        if token and RESEND_API_KEY:
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+            reset_link = f"{frontend_url}/?doctorreset={token}"
+            import requests as _req
+            _req.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": os.getenv("EMAIL_FROM", "MedEase <onboarding@resend.dev>"),
+                    "to": [request.email],
+                    "subject": "MedEase – Password Reset",
+                    "html": (
+                        f"<h2>Password Reset Request</h2>"
+                        f"<p>We received a request to reset your MedEase doctor portal password.</p>"
+                        f"<p><a href='{reset_link}' style='display:inline-block;padding:12px 24px;"
+                        f"background:#45BFD3;color:white;text-decoration:none;border-radius:8px;"
+                        f"font-weight:600'>Reset Password</a></p>"
+                        f"<p style='color:#6b7280;font-size:13px'>This link expires in 1 hour. "
+                        f"If you didn't request this, ignore this email.</p>"
+                    ),
+                },
+                timeout=10,
+            )
+        return JSONResponse(content={
+            "success": True,
+            "message": "If an account with that email exists, a reset link has been sent."
+        })
+    except Exception:
+        return JSONResponse(content={
+            "success": True,
+            "message": "If an account with that email exists, a reset link has been sent."
+        })
+
+
+class DoctorResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@app.post("/api/doctor/reset-password")
+async def doctor_reset_password(request: DoctorResetPasswordRequest):
+    """Reset a doctor's password using a valid token."""
+    try:
+        if len(request.new_password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+        success = db.reset_doctor_password_with_token(request.token, request.new_password)
+        if not success:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset link. Please request a new one.")
+
+        return JSONResponse(content={"success": True, "message": "Password has been reset. You can now log in."})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class RegisterPatientRequest(BaseModel):
     name: str
     username: str
@@ -3141,8 +3263,29 @@ async def clinicadmin_register_patient_full(request: RegisterPatientFullRequest)
 
 @app.post("/api/clinicadmin/doctors")
 async def clinicadmin_create_doctor(request: CreateDoctorRequest):
-    """Create a new doctor."""
+    """Create a new doctor with auto-generated login credentials."""
     try:
+        import hashlib, random
+
+        # Generate username (firstname.lastname)
+        first = request.first_name.strip().lower()
+        last = request.last_name.strip().lower()
+        username = f"{first}.{last}"
+
+        # Check for username collision
+        existing = db.get_all_doctors()
+        existing_usernames = {d.get('username', '') for d in existing if d.get('username')}
+        if username in existing_usernames:
+            for _ in range(100):
+                candidate = f"{username}{random.randint(1, 99)}"
+                if candidate not in existing_usernames:
+                    username = candidate
+                    break
+
+        # Generate password
+        password = f"{first}123"
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+
         doctor_id = db.create_doctor(
             first_name=request.first_name,
             last_name=request.last_name,
@@ -3156,7 +3299,9 @@ async def clinicadmin_create_doctor(request: CreateDoctorRequest):
             bio=request.bio,
             languages=request.languages,
             education=request.education,
-            certifications=request.certifications
+            certifications=request.certifications,
+            username=username,
+            password_hash=password_hash
         )
         # Update extended fields
         if request.consultation_fee or request.accepted_insurance:
@@ -3164,7 +3309,22 @@ async def clinicadmin_create_doctor(request: CreateDoctorRequest):
                            consultation_fee=request.consultation_fee,
                            accepted_insurance=request.accepted_insurance)
 
-        return JSONResponse(content={"success": True, "doctor_id": doctor_id, "message": "Doctor created"})
+        # Send credentials email if email provided
+        email_sent = False
+        if request.email and RESEND_API_KEY:
+            doctor_name = f"{request.first_name} {request.last_name}"
+            email_sent = send_credentials_email(request.email, doctor_name, username, password)
+
+        return JSONResponse(content={
+            "success": True,
+            "doctor_id": doctor_id,
+            "message": f"Doctor created successfully",
+            "credentials": {
+                "username": username,
+                "password": password
+            },
+            "email_sent": email_sent
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

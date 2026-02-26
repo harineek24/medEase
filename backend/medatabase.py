@@ -227,6 +227,8 @@ def init_database():
                 clinic_id INTEGER,
                 first_name TEXT NOT NULL,
                 last_name TEXT NOT NULL,
+                username TEXT UNIQUE,
+                password_hash TEXT,
                 title TEXT DEFAULT 'MD',
                 specialty TEXT,
                 sub_specialty TEXT,
@@ -753,11 +755,13 @@ def _seed_sample_data(cursor):
     ]
 
     for doc in doctors:
+        doc_username = f"{doc['first_name'].lower()}.{doc['last_name'].lower()}"
+        doc_pw_hash = hashlib.sha256(f"{doc['first_name'].lower()}123".encode()).hexdigest()
         cursor.execute("""
-            INSERT INTO doctors (clinic_id, first_name, last_name, title, specialty, sub_specialty,
+            INSERT INTO doctors (clinic_id, first_name, last_name, username, password_hash, title, specialty, sub_specialty,
                                npi_number, email, bio, languages, education, certifications)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (doc["clinic_id"], doc["first_name"], doc["last_name"], doc["title"],
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (doc["clinic_id"], doc["first_name"], doc["last_name"], doc_username, doc_pw_hash, doc["title"],
               doc["specialty"], doc["sub_specialty"], doc["npi_number"], doc["email"],
               doc["bio"], doc["languages"], doc["education"], doc["certifications"]))
 
@@ -1983,17 +1987,19 @@ def create_doctor(
     bio: Optional[str] = None,
     languages: str = "English",
     education: Optional[str] = None,
-    certifications: Optional[str] = None
+    certifications: Optional[str] = None,
+    username: Optional[str] = None,
+    password_hash: Optional[str] = None
 ) -> int:
     """Create a new doctor."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO doctors (clinic_id, first_name, last_name, title, specialty, sub_specialty,
+            INSERT INTO doctors (clinic_id, first_name, last_name, username, password_hash, title, specialty, sub_specialty,
                                npi_number, email, phone, bio, languages, education, certifications)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (clinic_id, first_name, last_name, title, specialty, sub_specialty,
+        """, (clinic_id, first_name, last_name, username, password_hash, title, specialty, sub_specialty,
               npi_number, email, phone, bio, languages, education, certifications))
         return cursor.fetchone()[0]
 
@@ -3388,7 +3394,8 @@ def create_password_reset_token(email: str) -> Optional[str]:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS password_reset_tokens (
                 id SERIAL PRIMARY KEY,
-                patient_id INTEGER NOT NULL REFERENCES patients(id),
+                patient_id INTEGER REFERENCES patients(id),
+                doctor_id INTEGER REFERENCES doctors(id),
                 token TEXT NOT NULL UNIQUE,
                 expires_at TIMESTAMP NOT NULL,
                 used BOOLEAN DEFAULT FALSE,
@@ -3411,7 +3418,7 @@ def reset_password_with_token(token: str, new_password: str) -> bool:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("""
             SELECT patient_id FROM password_reset_tokens
-            WHERE token = %s AND used = FALSE AND expires_at > CURRENT_TIMESTAMP
+            WHERE token = %s AND used = FALSE AND expires_at > CURRENT_TIMESTAMP AND patient_id IS NOT NULL
         """, (token,))
         row = cursor.fetchone()
         if not row:
@@ -3435,6 +3442,126 @@ def get_patient_email(patient_id: int) -> Optional[str]:
         cursor.execute("SELECT email FROM patients WHERE id = %s", (patient_id,))
         row = cursor.fetchone()
         return row['email'] if row and row['email'] else None
+
+
+# =============================================================================
+# Doctor Authentication
+# =============================================================================
+
+def verify_doctor_login(username: str, password: str, clinic_id: int = None) -> Optional[Dict]:
+    """Verify doctor login credentials. Optionally filter by clinic_id."""
+    import hashlib
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if clinic_id:
+            cursor.execute("""
+                SELECT d.id, d.first_name, d.last_name, d.username, d.email, d.specialty,
+                       d.title, d.clinic_id, c.name as clinic_name
+                FROM doctors d
+                LEFT JOIN clinics c ON d.clinic_id = c.id
+                WHERE d.username = %s AND d.password_hash = %s AND d.is_active = TRUE AND d.clinic_id = %s
+            """, (username, password_hash, clinic_id))
+        else:
+            cursor.execute("""
+                SELECT d.id, d.first_name, d.last_name, d.username, d.email, d.specialty,
+                       d.title, d.clinic_id, c.name as clinic_name
+                FROM doctors d
+                LEFT JOIN clinics c ON d.clinic_id = c.id
+                WHERE d.username = %s AND d.password_hash = %s AND d.is_active = TRUE
+            """, (username, password_hash))
+        user = cursor.fetchone()
+        if user:
+            result = _serialize_row(user)
+            result['name'] = f"{user['first_name']} {user['last_name']}"
+            return result
+        return None
+
+
+def change_doctor_password(doctor_id: int, old_password: str, new_password: str) -> bool:
+    """Change a doctor's password. Returns True if successful."""
+    import hashlib
+    old_hash = hashlib.sha256(old_password.encode()).hexdigest()
+    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            "SELECT id FROM doctors WHERE id = %s AND password_hash = %s",
+            (doctor_id, old_hash)
+        )
+        if not cursor.fetchone():
+            return False
+        cursor.execute(
+            "UPDATE doctors SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+            (new_hash, doctor_id)
+        )
+        return True
+
+
+def get_doctor_email(doctor_id: int) -> Optional[str]:
+    """Get a doctor's email by ID."""
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT email FROM doctors WHERE id = %s", (doctor_id,))
+        row = cursor.fetchone()
+        return row['email'] if row and row['email'] else None
+
+
+def create_doctor_reset_token(email: str) -> Optional[str]:
+    """Create a password reset token for a doctor. Returns token or None if email not found."""
+    import secrets
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT id FROM doctors WHERE LOWER(email) = LOWER(%s) AND is_active = TRUE", (email,))
+        doctor = cursor.fetchone()
+        if not doctor:
+            return None
+
+        token = secrets.token_urlsafe(32)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id SERIAL PRIMARY KEY,
+                patient_id INTEGER REFERENCES patients(id),
+                doctor_id INTEGER REFERENCES doctors(id),
+                token TEXT NOT NULL UNIQUE,
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO password_reset_tokens (doctor_id, token, expires_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP + INTERVAL '1 hour')
+        """, (doctor['id'], token))
+        return token
+
+
+def reset_doctor_password_with_token(token: str, new_password: str) -> bool:
+    """Reset a doctor's password using a valid token. Returns True if successful."""
+    import hashlib
+    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            SELECT doctor_id FROM password_reset_tokens
+            WHERE token = %s AND used = FALSE AND expires_at > CURRENT_TIMESTAMP AND doctor_id IS NOT NULL
+        """, (token,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        cursor.execute(
+            "UPDATE doctors SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+            (new_hash, row['doctor_id'])
+        )
+        cursor.execute(
+            "UPDATE password_reset_tokens SET used = TRUE WHERE token = %s",
+            (token,)
+        )
+        return True
 
 
 # Initialize database on module import
