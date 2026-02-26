@@ -17,6 +17,9 @@ import {
   AlertCircle,
   RefreshCw,
   ChevronDown,
+  Copy,
+  Check,
+  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -201,6 +204,11 @@ export default function AdminDoctorManagement() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  /* --- Credentials modal state --- */
+  const [showCredentials, setShowCredentials] = useState(false);
+  const [newCredentials, setNewCredentials] = useState<{ username: string; password: string; email_sent: boolean } | null>(null);
+  const [copied, setCopied] = useState(false);
+
   /* --- Side panel state --- */
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
   const [calendarLoading, setCalendarLoading] = useState(false);
@@ -317,8 +325,21 @@ export default function AdminDoctorManagement() {
         throw new Error(body || `Failed to add doctor (${res.status})`);
       }
 
+      const data = await res.json();
       setShowAddModal(false);
       setForm({ ...EMPTY_FORM });
+
+      // Show credentials modal
+      if (data.credentials) {
+        setNewCredentials({
+          username: data.credentials.username,
+          password: data.credentials.password,
+          email_sent: data.email_sent || false,
+        });
+        setShowCredentials(true);
+        setCopied(false);
+      }
+
       fetchDoctors();
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : "Failed to add doctor");
@@ -1068,6 +1089,76 @@ export default function AdminDoctorManagement() {
           </Fragment>
         )}
       </AnimatePresence>
+
+      {/* Doctor Credentials Modal */}
+      {showCredentials && newCredentials && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowCredentials(false)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowCredentials(false)}
+              className="absolute right-4 top-4 rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-5">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
+                <KeyRound className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Doctor Created</h3>
+                <p className="text-sm text-gray-500">Login credentials generated</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-600">Username</span>
+                <span className="text-sm font-mono text-gray-900">{newCredentials.username}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-600">Password</span>
+                <span className="text-sm font-mono text-gray-900">{newCredentials.password}</span>
+              </div>
+            </div>
+
+            {newCredentials.email_sent && (
+              <p className="mt-3 text-xs text-green-600 flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5" />
+                Credentials have been emailed to the doctor.
+              </p>
+            )}
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    `Username: ${newCredentials.username}\nPassword: ${newCredentials.password}`
+                  );
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                {copied ? "Copied!" : "Copy Credentials"}
+              </button>
+              <button
+                onClick={() => setShowCredentials(false)}
+                className="flex-1 px-4 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] text-white font-medium rounded-lg transition-colors text-sm"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

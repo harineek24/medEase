@@ -9,6 +9,7 @@ import {
   Loader2,
   Eye,
   EyeOff,
+  Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -16,10 +17,9 @@ import { API_BASE_URL } from '@/api'
 
 type RoleCard = 'clinicadmin' | 'doctor' | 'patient'
 
-interface DoctorOption {
+interface ClinicOption {
   id: number
   name: string
-  specialty: string
 }
 
 export default function LoginPage() {
@@ -49,11 +49,22 @@ export default function LoginPage() {
   const [adminError, setAdminError] = useState('')
   const [adminLoading, setAdminLoading] = useState(false)
 
-  // Doctor selection state
-  const [doctors, setDoctors] = useState<DoctorOption[]>([])
-  const [selectedDoctorId, setSelectedDoctorId] = useState<number | null>(null)
-  const [doctorsLoading, setDoctorsLoading] = useState(false)
-  const [doctorsError, setDoctorsError] = useState('')
+  // Doctor login state
+  const [clinics, setClinics] = useState<ClinicOption[]>([])
+  const [selectedClinicId, setSelectedClinicId] = useState<number | null>(null)
+  const [clinicsLoading, setClinicsLoading] = useState(false)
+  const [doctorUsername, setDoctorUsername] = useState('')
+  const [doctorPassword, setDoctorPassword] = useState('')
+  const [showDoctorPassword, setShowDoctorPassword] = useState(false)
+  const [doctorError, setDoctorError] = useState('')
+  const [doctorLoading, setDoctorLoading] = useState(false)
+  const [showDoctorForgotPassword, setShowDoctorForgotPassword] = useState(false)
+  const [doctorForgotEmail, setDoctorForgotEmail] = useState('')
+  const [doctorForgotLoading, setDoctorForgotLoading] = useState(false)
+  const [doctorForgotMessage, setDoctorForgotMessage] = useState('')
+
+  // Doctor reset token (from email link)
+  const doctorResetToken = searchParams.get('doctorreset')
 
   // Patient login state
   const [patientUsername, setPatientUsername] = useState('')
@@ -69,25 +80,23 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, role, navigate])
 
-  // Fetch doctors when doctor card is selected
+  // Fetch clinics when doctor card is selected
   useEffect(() => {
     if (selectedRole === 'doctor') {
-      setDoctorsLoading(true)
-      setDoctorsError('')
-      fetch(`${API_BASE_URL}/api/doctors`)
+      setClinicsLoading(true)
+      fetch(`${API_BASE_URL}/api/clinics`)
         .then((res) => {
-          if (!res.ok) throw new Error('Failed to fetch doctors')
+          if (!res.ok) throw new Error('Failed to fetch clinics')
           return res.json()
         })
         .then((data) => {
-          const list = Array.isArray(data) ? data : data.doctors || []
-          setDoctors(list)
-          if (list.length > 0 && !selectedDoctorId) setSelectedDoctorId(list[0].id)
+          const list = Array.isArray(data) ? data : data.clinics || []
+          setClinics(list)
         })
         .catch(() => {
-          setDoctorsError('Could not load doctors. Please try again.')
+          setClinics([])
         })
-        .finally(() => setDoctorsLoading(false))
+        .finally(() => setClinicsLoading(false))
     }
   }, [selectedRole])
 
@@ -123,17 +132,96 @@ export default function LoginPage() {
     }
   }
 
-  // Doctor enter handler
-  const handleDoctorEnter = () => {
-    const doctor = doctors.find((d) => d.id === selectedDoctorId)
-    if (!doctor) return
+  // Doctor login handler
+  const handleDoctorLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setDoctorError('')
+    setDoctorLoading(true)
 
-    login({
-      role: 'doctor',
-      user: doctor,
-      doctorId: doctor.id,
-    })
-    navigate('/doctor')
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/doctor/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: doctorUsername,
+          password: doctorPassword,
+          clinic_id: selectedClinicId || undefined,
+        }),
+      })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.detail || 'Invalid username or password')
+      }
+
+      const data = await response.json()
+      login({
+        role: 'doctor',
+        user: data.user,
+        doctorId: data.user.id,
+      })
+      navigate('/doctor')
+    } catch (err) {
+      setDoctorError(err instanceof Error ? err.message : 'Login failed')
+    } finally {
+      setDoctorLoading(false)
+    }
+  }
+
+  // Doctor forgot password handler
+  const handleDoctorForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setDoctorForgotLoading(true)
+    setDoctorForgotMessage('')
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/doctor/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: doctorForgotEmail }),
+      })
+      const data = await res.json()
+      setDoctorForgotMessage(data.message || 'If an account with that email exists, a reset link has been sent.')
+    } catch {
+      setDoctorForgotMessage('If an account with that email exists, a reset link has been sent.')
+    } finally {
+      setDoctorForgotLoading(false)
+    }
+  }
+
+  // Doctor reset password handler
+  const handleDoctorResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setResetError('')
+    setResetMessage('')
+
+    if (resetNewPassword.length < 6) {
+      setResetError('Password must be at least 6 characters')
+      return
+    }
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetError('Passwords do not match')
+      return
+    }
+
+    setResetLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/doctor/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: doctorResetToken, new_password: resetNewPassword }),
+      })
+      if (res.ok) {
+        setResetMessage('Password has been reset. You can now log in.')
+        setSearchParams({})
+      } else {
+        const data = await res.json()
+        setResetError(data.detail || 'Invalid or expired reset link.')
+      }
+    } catch {
+      setResetError('Something went wrong. Please try again.')
+    } finally {
+      setResetLoading(false)
+    }
   }
 
   // Patient login handler
@@ -265,15 +353,15 @@ export default function LoginPage() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-12">
-        {/* Password Reset Form (from email link) */}
-        {resetToken ? (
+        {/* Password Reset Form (from email link - patient or doctor) */}
+        {(resetToken || doctorResetToken) ? (
           <div className="w-full max-w-md">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Reset Your Password</h3>
               {resetMessage ? (
                 <div className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 mb-4">{resetMessage}</div>
               ) : (
-                <form onSubmit={handleResetPassword} className="space-y-4">
+                <form onSubmit={doctorResetToken ? handleDoctorResetPassword : handleResetPassword} className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
                     <input
@@ -436,54 +524,137 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Doctor Selection */}
+          {/* Doctor Login */}
           {selectedRole === 'doctor' && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center gap-2">
                 <Stethoscope className="w-5 h-5 text-[#45BFD3]" />
-                Select Doctor
+                Doctor Login
               </h3>
-              {doctorsLoading ? (
-                <div className="flex items-center justify-center py-8 text-gray-400">
-                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Loading doctors...
-                </div>
-              ) : doctorsError ? (
-                <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{doctorsError}</p>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <label htmlFor="doctor-select" className="block text-sm font-medium text-gray-700 mb-1">
-                      Doctor
-                    </label>
+              <form onSubmit={handleDoctorLogin} className="space-y-4">
+                <div>
+                  <label htmlFor="doctor-clinic" className="block text-sm font-medium text-gray-700 mb-1">
+                    <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> Clinic</span>
+                  </label>
+                  {clinicsLoading ? (
+                    <div className="flex items-center py-2 text-gray-400 text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      Loading clinics...
+                    </div>
+                  ) : (
                     <select
-                      id="doctor-select"
-                      value={selectedDoctorId ?? ''}
-                      onChange={(e) => setSelectedDoctorId(e.target.value ? Number(e.target.value) : null)}
+                      id="doctor-clinic"
+                      value={selectedClinicId ?? ''}
+                      onChange={(e) => setSelectedClinicId(e.target.value ? Number(e.target.value) : null)}
                       className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all"
                     >
-                      <option value="">-- Choose a doctor --</option>
-                      {doctors.map((doc) => (
-                        <option key={doc.id} value={doc.id}>
-                          {doc.name} {doc.specialty ? `- ${doc.specialty}` : ''}
-                        </option>
+                      <option value="">-- Select your clinic --</option>
+                      {clinics.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
+                  )}
+                </div>
+                <div>
+                  <label htmlFor="doctor-username" className="block text-sm font-medium text-gray-700 mb-1">
+                    Username
+                  </label>
+                  <input
+                    id="doctor-username"
+                    type="text"
+                    value={doctorUsername}
+                    onChange={(e) => setDoctorUsername(e.target.value)}
+                    required
+                    placeholder="Enter your username"
+                    className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="doctor-password" className="block text-sm font-medium text-gray-700 mb-1">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="doctor-password"
+                      type={showDoctorPassword ? 'text' : 'password'}
+                      value={doctorPassword}
+                      onChange={(e) => setDoctorPassword(e.target.value)}
+                      required
+                      placeholder="Enter your password"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowDoctorPassword(!showDoctorPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showDoctorPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+                {doctorError && (
+                  <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{doctorError}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={doctorLoading || !doctorUsername || !doctorPassword}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors text-sm"
+                >
+                  {doctorLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <LogIn className="w-4 h-4" />
+                  )}
+                  {doctorLoading ? 'Signing in...' : 'Sign In'}
+                </button>
+              </form>
+              <button
+                type="button"
+                onClick={() => setShowDoctorForgotPassword(true)}
+                className="w-full mt-3 text-sm text-[#45BFD3] hover:underline text-center"
+              >
+                Forgot password?
+              </button>
+              <p className="text-xs text-gray-400 mt-2 text-center">
+                Your clinic admin will provide your login credentials.
+              </p>
+            </div>
+          )}
+
+          {/* Doctor Forgot Password Form */}
+          {selectedRole === 'doctor' && showDoctorForgotPassword && (
+            <div className="mt-4 bg-white rounded-2xl border border-gray-100 shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h3 className="text-base font-medium text-gray-900 mb-3">Reset Password</h3>
+              {doctorForgotMessage ? (
+                <div className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 mb-3">{doctorForgotMessage}</div>
+              ) : (
+                <form onSubmit={handleDoctorForgotPassword} className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
+                    <input
+                      type="email"
+                      value={doctorForgotEmail}
+                      onChange={(e) => setDoctorForgotEmail(e.target.value)}
+                      required
+                      placeholder="Enter your email"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-900 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#45BFD3]/40 focus:border-[#45BFD3] transition-all"
+                    />
                   </div>
                   <button
-                    type="button"
-                    onClick={handleDoctorEnter}
-                    disabled={!selectedDoctorId}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors text-sm"
+                    type="submit"
+                    disabled={doctorForgotLoading || !doctorForgotEmail}
+                    className="w-full px-4 py-2.5 bg-[#45BFD3] hover:bg-[#3aa8ba] disabled:opacity-50 text-white font-medium rounded-lg transition-colors text-sm"
                   >
-                    <ChevronRight className="w-4 h-4" />
-                    Enter Doctor Portal
+                    {doctorForgotLoading ? 'Sending...' : 'Send Reset Link'}
                   </button>
-                  <p className="text-xs text-gray-400 mt-3 text-center">
-                    Default: Select first doctor (Dr. Sarah Chen)
-                  </p>
-                </div>
+                </form>
               )}
+              <button
+                onClick={() => { setShowDoctorForgotPassword(false); setDoctorForgotMessage('') }}
+                className="w-full mt-2 text-sm text-gray-400 hover:text-gray-600 text-center"
+              >
+                Back to login
+              </button>
             </div>
           )}
 
