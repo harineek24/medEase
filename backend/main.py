@@ -1829,6 +1829,100 @@ async def patient_login(request: PatientLoginRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Password Management ---
+
+class ChangePasswordRequest(BaseModel):
+    patient_id: int
+    old_password: str
+    new_password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@app.post("/api/patient/change-password")
+async def change_password(request: ChangePasswordRequest):
+    """Change a patient's password (requires current password)."""
+    try:
+        if len(request.new_password) < 6:
+            raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+        success = db.change_patient_password(request.patient_id, request.old_password, request.new_password)
+        if not success:
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+        return JSONResponse(content={"success": True, "message": "Password changed successfully"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/patient/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Send a password reset email. Always returns success to prevent email enumeration."""
+    try:
+        token = db.create_password_reset_token(request.email)
+        if token and RESEND_API_KEY:
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+            reset_link = f"{frontend_url}/?reset={token}"
+            import requests as _req
+            _req.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": os.getenv("EMAIL_FROM", "MedEase <onboarding@resend.dev>"),
+                    "to": [request.email],
+                    "subject": "MedEase – Password Reset",
+                    "html": (
+                        f"<h2>Password Reset Request</h2>"
+                        f"<p>We received a request to reset your MedEase password.</p>"
+                        f"<p><a href='{reset_link}' style='display:inline-block;padding:12px 24px;"
+                        f"background:#45BFD3;color:white;text-decoration:none;border-radius:8px;"
+                        f"font-weight:600'>Reset Password</a></p>"
+                        f"<p style='color:#6b7280;font-size:13px'>This link expires in 1 hour. "
+                        f"If you didn't request this, ignore this email.</p>"
+                    ),
+                },
+                timeout=10,
+            )
+        # Always return success to prevent email enumeration
+        return JSONResponse(content={
+            "success": True,
+            "message": "If an account with that email exists, a reset link has been sent."
+        })
+    except Exception:
+        return JSONResponse(content={
+            "success": True,
+            "message": "If an account with that email exists, a reset link has been sent."
+        })
+
+
+@app.post("/api/patient/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    """Reset password using a valid token."""
+    try:
+        if len(request.new_password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+        success = db.reset_password_with_token(request.token, request.new_password)
+        if not success:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset link. Please request a new one.")
+
+        return JSONResponse(content={"success": True, "message": "Password has been reset. You can now log in."})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class RegisterPatientRequest(BaseModel):
     name: str
     username: str
