@@ -213,7 +213,7 @@ class VoiceConsultationService:
         self.configs: Dict[str, ConsultationConfig] = {"default": ConsultationConfig()}
 
         # Model for live audio - matching voicegen reference
-        self.model_id = "gemini-2.5-flash-native-audio-preview-09-2025"
+        self.model_id = "gemini-2.5-flash-native-audio-preview-12-2025"
 
         if GENAI_AVAILABLE and self.api_key:
             self.client = genai.Client(

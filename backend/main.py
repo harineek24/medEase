@@ -63,7 +63,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Initialize Gemini model
-model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # Constants
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB
