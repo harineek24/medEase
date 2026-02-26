@@ -6,7 +6,8 @@ import os
 import json
 import psycopg2
 import psycopg2.extras
-from datetime import datetime
+from datetime import datetime, date
+from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 
@@ -15,6 +16,24 @@ DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql://user:password@localhost:5432/medease"
 )
+
+
+def _serialize_row(row) -> Dict:
+    """Convert a database row to a JSON-serializable dict.
+
+    PostgreSQL returns datetime and Decimal objects that json.dumps() cannot
+    serialize.  SQLite returns these as plain strings/floats, which is why the
+    app works locally but breaks on Render/Neon.
+    """
+    d = dict(row)
+    for key, value in d.items():
+        if isinstance(value, datetime):
+            d[key] = value.isoformat()
+        elif isinstance(value, date):
+            d[key] = value.isoformat()
+        elif isinstance(value, Decimal):
+            d[key] = float(value)
+    return d
 
 
 def get_connection():
@@ -1228,7 +1247,7 @@ def get_patient(patient_id: int) -> Optional[Dict]:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT * FROM patients WHERE id = %s", (patient_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return _serialize_row(row) if row else None
 
 
 def get_patient_by_name(name: str) -> Optional[Dict]:
@@ -1240,7 +1259,7 @@ def get_patient_by_name(name: str) -> Optional[Dict]:
             (f"%{name}%",)
         )
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return _serialize_row(row) if row else None
 
 
 def get_all_patients() -> List[Dict]:
@@ -1248,7 +1267,7 @@ def get_all_patients() -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT * FROM patients ORDER BY created_at DESC")
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def search_patients(query: str) -> List[Dict]:
@@ -1259,7 +1278,7 @@ def search_patients(query: str) -> List[Dict]:
             "SELECT * FROM patients WHERE LOWER(name) LIKE LOWER(%s) ORDER BY created_at DESC",
             (f"%{query}%",)
         )
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -1301,19 +1320,19 @@ def get_summary(summary_id: int) -> Optional[Dict]:
         if not summary:
             return None
 
-        summary_dict = dict(summary)
+        summary_dict = _serialize_row(summary)
 
         # Get medications
         cursor.execute("SELECT * FROM medications WHERE summary_id = %s", (summary_id,))
-        summary_dict['medications'] = [dict(row) for row in cursor.fetchall()]
+        summary_dict['medications'] = [_serialize_row(row) for row in cursor.fetchall()]
 
         # Get test results
         cursor.execute("SELECT * FROM test_results WHERE summary_id = %s", (summary_id,))
-        summary_dict['test_results'] = [dict(row) for row in cursor.fetchall()]
+        summary_dict['test_results'] = [_serialize_row(row) for row in cursor.fetchall()]
 
         # Get interactions
         cursor.execute("SELECT * FROM drug_interactions WHERE summary_id = %s", (summary_id,))
-        summary_dict['interactions'] = [dict(row) for row in cursor.fetchall()]
+        summary_dict['interactions'] = [_serialize_row(row) for row in cursor.fetchall()]
 
         return summary_dict
 
@@ -1326,7 +1345,7 @@ def get_patient_summaries(patient_id: int) -> List[Dict]:
             "SELECT * FROM summaries WHERE patient_id = %s ORDER BY created_at DESC",
             (patient_id,)
         )
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_all_summaries(limit: int = 50) -> List[Dict]:
@@ -1340,7 +1359,7 @@ def get_all_summaries(limit: int = 50) -> List[Dict]:
             ORDER BY s.created_at DESC
             LIMIT %s
         """, (limit,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_recent_summaries(limit: int = 10) -> List[Dict]:
@@ -1383,7 +1402,7 @@ def get_all_medications() -> List[Dict]:
             LEFT JOIN patients p ON s.patient_id = p.id
             ORDER BY m.created_at DESC
         """)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_medications_timeline() -> List[Dict]:
@@ -1398,7 +1417,7 @@ def get_medications_timeline() -> List[Dict]:
             LEFT JOIN patients p ON s.patient_id = p.id
             ORDER BY s.created_at ASC
         """)
-        summaries = [dict(row) for row in cursor.fetchall()]
+        summaries = [_serialize_row(row) for row in cursor.fetchall()]
 
         for summary in summaries:
             cursor.execute("""
@@ -1407,7 +1426,7 @@ def get_medications_timeline() -> List[Dict]:
                 WHERE summary_id = %s
                 ORDER BY name ASC
             """, (summary['summary_id'],))
-            summary['medications'] = [dict(row) for row in cursor.fetchall()]
+            summary['medications'] = [_serialize_row(row) for row in cursor.fetchall()]
 
         return summaries
 
@@ -1448,7 +1467,7 @@ def get_test_result_history(test_name: str) -> list:
             WHERE LOWER(tr.test_name) LIKE LOWER(%s)
             ORDER BY tr.created_at ASC
         """, (f"%{test_name}%",))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_all_test_names() -> list:
@@ -1464,7 +1483,7 @@ def get_all_test_names() -> list:
             ) sub
             ORDER BY latest_at DESC
         """)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -1523,7 +1542,7 @@ def get_chat_history(session_id: str, limit: int = 50) -> List[Dict]:
             ORDER BY created_at ASC
             LIMIT %s
         """, (session_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_patient_chat_history(patient_id: int, limit: int = 50) -> List[Dict]:
@@ -1536,7 +1555,7 @@ def get_patient_chat_history(patient_id: int, limit: int = 50) -> List[Dict]:
             ORDER BY created_at DESC
             LIMIT %s
         """, (patient_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -1585,7 +1604,7 @@ def get_dashboard_stats() -> Dict[str, Any]:
             ORDER BY count DESC
             LIMIT 10
         """)
-        medications_by_class = [dict(row) for row in cursor.fetchall()]
+        medications_by_class = [_serialize_row(row) for row in cursor.fetchall()]
 
         cursor.execute("""
             SELECT s.id, s.created_at, p.name as patient_name, s.diagnosis
@@ -1594,14 +1613,14 @@ def get_dashboard_stats() -> Dict[str, Any]:
             ORDER BY s.created_at DESC
             LIMIT 10
         """)
-        recent_activity = [dict(row) for row in cursor.fetchall()]
+        recent_activity = [_serialize_row(row) for row in cursor.fetchall()]
 
         cursor.execute("""
             SELECT severity, COUNT(*) as count
             FROM drug_interactions
             GROUP BY severity
         """)
-        interactions_by_severity = [dict(row) for row in cursor.fetchall()]
+        interactions_by_severity = [_serialize_row(row) for row in cursor.fetchall()]
 
         return {
             "total_patients": total_patients,
@@ -1640,7 +1659,7 @@ def get_consultation_session(session_id: str) -> Optional[Dict]:
         )
         row = cursor.fetchone()
         if row:
-            session = dict(row)
+            session = _serialize_row(row)
             session['fields'] = get_consultation_fields(session_id)
             return session
         return None
@@ -1745,7 +1764,7 @@ def get_consultation_fields(session_id: str) -> List[Dict]:
             WHERE session_id = %s
             ORDER BY created_at ASC
         """, (session_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_all_consultations(limit: int = 50) -> List[Dict]:
@@ -1760,7 +1779,7 @@ def get_all_consultations(limit: int = 50) -> List[Dict]:
             ORDER BY cs.created_at DESC
             LIMIT %s
         """, (limit,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_consultations_for_doctor_today(doctor_id: int) -> list:
@@ -1778,7 +1797,7 @@ def get_consultations_for_doctor_today(doctor_id: int) -> list:
             AND DATE(cs.completed_at) = CURRENT_DATE
             ORDER BY cs.completed_at DESC
         """, (doctor_id,))
-        sessions = [dict(row) for row in cursor.fetchall()]
+        sessions = [_serialize_row(row) for row in cursor.fetchall()]
         for session in sessions:
             session['fields'] = get_consultation_fields(session['session_id'])
         return sessions
@@ -1794,7 +1813,7 @@ def get_patient_consultations(patient_id: int, limit: int = 50) -> list:
             ORDER BY completed_at DESC
             LIMIT %s
         """, (patient_id, limit))
-        sessions = [dict(row) for row in cursor.fetchall()]
+        sessions = [_serialize_row(row) for row in cursor.fetchall()]
         for session in sessions:
             session['fields'] = get_consultation_fields(session['session_id'])
         return sessions
@@ -1811,7 +1830,7 @@ def get_all_clinics(active_only: bool = True) -> List[Dict]:
             query += " WHERE is_active = TRUE"
         query += " ORDER BY name"
         cursor.execute(query)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_clinic(clinic_id: int) -> Optional[Dict]:
@@ -1823,21 +1842,21 @@ def get_clinic(clinic_id: int) -> Optional[Dict]:
         if not clinic:
             return None
 
-        clinic_dict = dict(clinic)
+        clinic_dict = _serialize_row(clinic)
 
         # Get doctors
         cursor.execute("""
             SELECT * FROM doctors WHERE clinic_id = %s AND is_active = TRUE
             ORDER BY last_name
         """, (clinic_id,))
-        clinic_dict['doctors'] = [dict(row) for row in cursor.fetchall()]
+        clinic_dict['doctors'] = [_serialize_row(row) for row in cursor.fetchall()]
 
         # Get services
         cursor.execute("""
             SELECT * FROM clinic_services WHERE clinic_id = %s AND is_active = TRUE
             ORDER BY category, service_name
         """, (clinic_id,))
-        clinic_dict['services'] = [dict(row) for row in cursor.fetchall()]
+        clinic_dict['services'] = [_serialize_row(row) for row in cursor.fetchall()]
 
         return clinic_dict
 
@@ -1909,7 +1928,7 @@ def get_all_doctors(active_only: bool = True) -> List[Dict]:
             query += " WHERE d.is_active = TRUE"
         query += " ORDER BY d.last_name, d.first_name"
         cursor.execute(query)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_doctor(doctor_id: int) -> Optional[Dict]:
@@ -1923,7 +1942,7 @@ def get_doctor(doctor_id: int) -> Optional[Dict]:
             WHERE d.id = %s
         """, (doctor_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return _serialize_row(row) if row else None
 
 
 def get_doctors_by_clinic(clinic_id: int) -> List[Dict]:
@@ -1934,7 +1953,7 @@ def get_doctors_by_clinic(clinic_id: int) -> List[Dict]:
             SELECT * FROM doctors WHERE clinic_id = %s AND is_active = TRUE
             ORDER BY last_name, first_name
         """, (clinic_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_doctors_by_specialty(specialty: str) -> List[Dict]:
@@ -1948,7 +1967,7 @@ def get_doctors_by_specialty(specialty: str) -> List[Dict]:
             WHERE LOWER(d.specialty) LIKE LOWER(%s) AND d.is_active = TRUE
             ORDER BY d.last_name
         """, (f"%{specialty}%",))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def create_doctor(
@@ -2025,7 +2044,7 @@ def get_clinic_services(clinic_id: int) -> List[Dict]:
             WHERE clinic_id = %s AND is_active = TRUE
             ORDER BY category, service_name
         """, (clinic_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def create_clinic_service(
@@ -2071,7 +2090,7 @@ def verify_admin_login(username: str, password: str) -> Optional[Dict]:
                 "UPDATE admin_users SET last_login = CURRENT_TIMESTAMP WHERE id = %s",
                 (user['id'],)
             )
-            return dict(user)
+            return _serialize_row(user)
         return None
 
 
@@ -2088,7 +2107,7 @@ def verify_patient_login(username: str, password: str) -> Optional[Dict]:
             WHERE username = %s AND password_hash = %s AND is_active = TRUE
         """, (username, password_hash))
         user = cursor.fetchone()
-        return dict(user) if user else None
+        return _serialize_row(user) if user else None
 
 
 def register_patient(name: str, username: str, password: str,
@@ -2117,7 +2136,7 @@ def get_admin_user(user_id: int) -> Optional[Dict]:
             FROM admin_users WHERE id = %s
         """, (user_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return _serialize_row(row) if row else None
 
 
 # =============================================================================
@@ -2167,7 +2186,7 @@ def get_consultation_config(config_id: str) -> Optional[Dict]:
         )
         row = cursor.fetchone()
         if row:
-            config = dict(row)
+            config = _serialize_row(row)
             config['fields'] = json_lib.loads(config['fields'])
             config['settings'] = json_lib.loads(config['settings']) if config['settings'] else {}
             return config
@@ -2190,7 +2209,7 @@ def get_all_consultation_configs(clinic_id: Optional[int] = None) -> List[Dict]:
             )
         configs = []
         for row in cursor.fetchall():
-            config = dict(row)
+            config = _serialize_row(row)
             config['fields'] = json_lib.loads(config['fields'])
             config['settings'] = json_lib.loads(config['settings']) if config['settings'] else {}
             configs.append(config)
@@ -2270,7 +2289,7 @@ def get_patient_vitals(patient_id: int, limit: int = 50) -> List[Dict]:
             WHERE v.patient_id = %s
             ORDER BY v.recorded_at DESC LIMIT %s
         """, (patient_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_latest_vitals(patient_id: int) -> Optional[Dict]:
@@ -2306,7 +2325,7 @@ def get_patient_doctor_notes(patient_id: int, limit: int = 50) -> List[Dict]:
             WHERE dn.patient_id = %s
             ORDER BY dn.created_at DESC LIMIT %s
         """, (patient_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_doctor_notes_by_doctor(doctor_id: int, limit: int = 50) -> List[Dict]:
@@ -2319,7 +2338,7 @@ def get_doctor_notes_by_doctor(doctor_id: int, limit: int = 50) -> List[Dict]:
             WHERE dn.doctor_id = %s
             ORDER BY dn.created_at DESC LIMIT %s
         """, (doctor_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def mark_notes_read(patient_id: int):
@@ -2364,7 +2383,7 @@ def get_patient_journal(patient_id: int, limit: int = 50) -> List[Dict]:
             SELECT * FROM journal_entries WHERE patient_id = %s
             ORDER BY created_at DESC LIMIT %s
         """, (patient_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_today_journal(patient_id: int) -> Optional[Dict]:
@@ -2376,7 +2395,7 @@ def get_today_journal(patient_id: int) -> Optional[Dict]:
             ORDER BY created_at DESC LIMIT 1
         """, (patient_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return _serialize_row(row) if row else None
 
 
 # =============================================================================
@@ -2408,7 +2427,7 @@ def get_patient_billing(patient_id: int, limit: int = 50) -> List[Dict]:
             WHERE b.patient_id = %s
             ORDER BY b.created_at DESC LIMIT %s
         """, (patient_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_all_billing(status: str = None, limit: int = 100) -> List[Dict]:
@@ -2426,7 +2445,7 @@ def get_all_billing(status: str = None, limit: int = 100) -> List[Dict]:
         query += " ORDER BY b.created_at DESC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_billing_summary() -> Dict:
@@ -2472,7 +2491,7 @@ def get_patient_insurance(patient_id: int) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT * FROM insurance WHERE patient_id = %s ORDER BY is_primary DESC", (patient_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -2543,13 +2562,13 @@ def get_claim(claim_id: int) -> Optional[Dict]:
         row = cursor.fetchone()
         if not row:
             return None
-        claim = dict(row)
+        claim = _serialize_row(row)
         # Get line items
         cursor.execute("SELECT * FROM claim_lines WHERE claim_id = %s ORDER BY line_number", (claim_id,))
-        claim['lines'] = [dict(r) for r in cursor.fetchall()]
+        claim['lines'] = [_serialize_row(r) for r in cursor.fetchall()]
         # Get events
         cursor.execute("SELECT * FROM revenue_cycle_events WHERE claim_id = %s ORDER BY created_at DESC", (claim_id,))
-        claim['events'] = [dict(r) for r in cursor.fetchall()]
+        claim['events'] = [_serialize_row(r) for r in cursor.fetchall()]
         return claim
 
 
@@ -2571,7 +2590,7 @@ def get_all_claims(status: str = None, limit: int = 100) -> List[Dict]:
         query += " ORDER BY c.created_at DESC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def update_claim_status(claim_id: int, new_status: str, details: str = None) -> bool:
@@ -2663,7 +2682,7 @@ def get_eligibility_history(patient_id: int = None, limit: int = 50) -> List[Dic
                 JOIN patients p ON ec.patient_id = p.id
                 ORDER BY ec.checked_at DESC LIMIT %s
             """, (limit,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -2721,7 +2740,7 @@ def get_payments(patient_id: int = None, limit: int = 100) -> List[Dict]:
                 JOIN patients p ON py.patient_id = p.id
                 ORDER BY py.created_at DESC LIMIT %s
             """, (limit,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_payment_summary() -> Dict:
@@ -2771,7 +2790,7 @@ def get_patient_statements(patient_id: int, limit: int = 50) -> List[Dict]:
             WHERE s.patient_id = %s
             ORDER BY s.created_at DESC LIMIT %s
         """, (patient_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_all_statements(status: str = None, limit: int = 100) -> List[Dict]:
@@ -2789,7 +2808,7 @@ def get_all_statements(status: str = None, limit: int = 100) -> List[Dict]:
         query += " ORDER BY s.created_at DESC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -2824,7 +2843,7 @@ def get_patient_prescriptions(patient_id: int, active_only: bool = True) -> List
             query += " AND p.status = 'active'"
         query += " ORDER BY p.prescribed_date DESC"
         cursor.execute(query, (patient_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 # =============================================================================
 # Lab Results Operations
 # =============================================================================
@@ -2861,7 +2880,7 @@ def get_patient_labs(patient_id: int, lab_type: str = None, limit: int = 50) -> 
         query += " ORDER BY lr.ordered_date DESC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -2887,7 +2906,7 @@ def get_appointments_by_doctor(doctor_id: int, status: str = None, limit: int = 
         query += " ORDER BY a.appointment_date ASC, a.appointment_time ASC LIMIT %s"
         params.append(limit)
         cursor.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_today_appointments(doctor_id: int = None) -> List[Dict]:
@@ -2908,7 +2927,7 @@ def get_today_appointments(doctor_id: int = None) -> List[Dict]:
             params.append(doctor_id)
         query += " ORDER BY a.appointment_time ASC"
         cursor.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_appointment_stats(doctor_id: int = None, days: int = 30) -> Dict:
@@ -2981,7 +3000,7 @@ def get_patient_appointments(patient_id: int, limit: int = 20) -> List[Dict]:
             WHERE a.patient_id = %s
             ORDER BY a.appointment_date DESC, a.appointment_time DESC LIMIT %s
         """, (patient_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -3012,7 +3031,7 @@ def get_doctor_patient_stories(doctor_id: int) -> List[Dict]:
             )
             ORDER BY p.name ASC
         """, (doctor_id, doctor_id))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_doctor_feed_summaries(doctor_id: int, limit: int = 50) -> List[Dict]:
@@ -3027,7 +3046,7 @@ def get_doctor_feed_summaries(doctor_id: int, limit: int = 50) -> List[Dict]:
             JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = %s
             ORDER BY p.name ASC, s.created_at DESC
         """, (doctor_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_all_patients_for_doctor(doctor_id: int) -> List[Dict]:
@@ -3044,7 +3063,7 @@ def get_all_patients_for_doctor(doctor_id: int) -> List[Dict]:
             JOIN appointments a ON a.patient_id = p.id AND a.doctor_id = %s
             ORDER BY p.name ASC
         """, (doctor_id, doctor_id))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 # =============================================================================
@@ -3104,7 +3123,7 @@ def get_patient_updates(patient_id: int, limit: int = 50) -> list:
             SELECT * FROM patient_updates WHERE patient_id = %s
             ORDER BY created_at DESC LIMIT %s
         """, (patient_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_patient_update_by_id(update_id: int) -> dict:
@@ -3118,7 +3137,7 @@ def get_patient_update_by_id(update_id: int) -> dict:
             WHERE pu.id = %s
         """, (update_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return _serialize_row(row) if row else None
 
 
 def get_patient_updates_for_doctor(doctor_id: int, days: int = 7, limit: int = 50) -> list:
@@ -3136,7 +3155,7 @@ def get_patient_updates_for_doctor(doctor_id: int, days: int = 7, limit: int = 5
             ORDER BY pu.created_at DESC
             LIMIT %s
         """, (doctor_id, days, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def add_doctor_reply(doctor_id: int, patient_id: int, update_id: int,
@@ -3164,7 +3183,7 @@ def get_replies_for_update(update_id: int) -> list:
             WHERE dr.update_id = %s
             ORDER BY dr.created_at ASC
         """, (update_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_doctor_patient_communications(doctor_id: int, patient_id: int) -> list:
@@ -3178,7 +3197,7 @@ def get_doctor_patient_communications(doctor_id: int, patient_id: int) -> list:
             WHERE dr.doctor_id = %s AND dr.patient_id = %s
             ORDER BY dr.created_at DESC
         """, (doctor_id, patient_id))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_doctor_replies_for_patient(patient_id: int) -> list:
@@ -3194,7 +3213,7 @@ def get_doctor_replies_for_patient(patient_id: int) -> list:
             WHERE dr.patient_id = %s
             ORDER BY dr.created_at DESC
         """, (patient_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def search_doctors_advanced(query: str = None, specialty: str = None,
@@ -3239,7 +3258,7 @@ def search_doctors_advanced(query: str = None, specialty: str = None,
             WHERE {where}
             ORDER BY d.rating DESC, d.review_count DESC
         """, params)
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_doctor_appointments_for_date(doctor_id: int, date: str) -> List[Dict]:
@@ -3254,7 +3273,7 @@ def get_doctor_appointments_for_date(doctor_id: int, date: str) -> List[Dict]:
             AND a.status NOT IN ('cancelled')
             ORDER BY a.appointment_time ASC
         """, (doctor_id, date))
-        return [dict(row) for row in cursor.fetchall()]
+        return [_serialize_row(row) for row in cursor.fetchall()]
 
 
 def get_all_specialties() -> List[str]:

@@ -21,6 +21,7 @@ from medication_analyzer import analyzer
 
 # Import database and chat handlers
 import medatabase as db
+import psycopg2.extras
 from chat_handler import patient_chat, general_chat, check_quick_response, doctor_consultation, generate_consultation_summary
 from voice_service import voice_service, CONSULTATION_FIELDS, ConsultationConfig, DEFAULT_CONSULTATION_FIELDS, AVAILABLE_VOICES
 
@@ -1744,8 +1745,8 @@ async def clinicadmin_register_patient(request: RegisterPatientRequest):
         # Check if username already taken
         existing = None
         with db.get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM patients WHERE username = ?", (request.username,))
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute("SELECT id FROM patients WHERE username = %s", (request.username,))
             existing = cursor.fetchone()
 
         if existing:
@@ -1968,7 +1969,7 @@ async def clinicadmin_appointments(
     """All appointments with optional filters."""
     try:
         with db.get_db() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             query = """
                 SELECT a.*, p.name as patient_name, cs.service_name,
                        d.first_name || ' ' || d.last_name as doctor_name,
@@ -1982,15 +1983,15 @@ async def clinicadmin_appointments(
             """
             params = []
             if status:
-                query += " AND a.status = ?"
+                query += " AND a.status = %s"
                 params.append(status)
             if doctor_id:
-                query += " AND a.doctor_id = ?"
+                query += " AND a.doctor_id = %s"
                 params.append(doctor_id)
-            query += " ORDER BY a.appointment_date DESC, a.appointment_time ASC LIMIT ?"
+            query += " ORDER BY a.appointment_date DESC, a.appointment_time ASC LIMIT %s"
             params.append(limit)
             cursor.execute(query, params)
-            appointments = [dict(row) for row in cursor.fetchall()]
+            appointments = [db._serialize_row(row) for row in cursor.fetchall()]
         return JSONResponse(content={"appointments": appointments, "count": len(appointments)})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting appointments: {str(e)}")
@@ -2804,25 +2805,25 @@ async def doctor_calendar(doctor_id: int, start_date: Optional[str] = None, end_
             raise HTTPException(status_code=404, detail="Doctor not found")
 
         with db.get_db() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             query = """
                 SELECT a.*, p.name as patient_name, p.phone as patient_phone,
                        p.email as patient_email, c.name as clinic_name
                 FROM appointments a
                 LEFT JOIN patients p ON a.patient_id = p.id
                 LEFT JOIN clinics c ON a.clinic_id = c.id
-                WHERE a.doctor_id = ?
+                WHERE a.doctor_id = %s
             """
             params = [doctor_id]
             if start_date:
-                query += " AND a.appointment_date >= ?"
+                query += " AND a.appointment_date >= %s"
                 params.append(start_date)
             if end_date:
-                query += " AND a.appointment_date <= ?"
+                query += " AND a.appointment_date <= %s"
                 params.append(end_date)
             query += " ORDER BY a.appointment_date ASC, a.appointment_time ASC"
             cursor.execute(query, params)
-            appointments = [dict(row) for row in cursor.fetchall()]
+            appointments = [db._serialize_row(row) for row in cursor.fetchall()]
 
         return JSONResponse(content={"appointments": appointments, "count": len(appointments)})
     except HTTPException:
@@ -2859,17 +2860,17 @@ async def doctor_update_appointment(doctor_id: int, appointment_id: int, request
 
         # Return the updated appointment so the frontend can refresh its state
         with db.get_db() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cursor.execute("""
                 SELECT a.*, p.name as patient_name, p.phone as patient_phone,
                        p.email as patient_email, c.name as clinic_name
                 FROM appointments a
                 LEFT JOIN patients p ON a.patient_id = p.id
                 LEFT JOIN clinics c ON a.clinic_id = c.id
-                WHERE a.id = ?
+                WHERE a.id = %s
             """, (appointment_id,))
             row = cursor.fetchone()
-            updated_appointment = dict(row) if row else {}
+            updated_appointment = db._serialize_row(row) if row else {}
 
         return JSONResponse(content=updated_appointment)
     except HTTPException:
@@ -2896,8 +2897,8 @@ async def clinicadmin_register_patient_full(request: RegisterPatientFullRequest)
         # Check if username exists, append number if so
         existing = None
         with db.get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM patients WHERE username = ?", (username,))
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute("SELECT id FROM patients WHERE username = %s", (username,))
             existing = cursor.fetchone()
 
         if existing:
@@ -3107,7 +3108,7 @@ async def scrub_claim(claim_id: int):
         import json
         with db.get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("UPDATE claims SET scrub_results = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            cursor.execute("UPDATE claims SET scrub_results = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
                            (json.dumps(results), claim_id))
         if results["passed"]:
             db.update_claim_status(claim_id, "validated", "Passed all edit checks")
@@ -3185,8 +3186,8 @@ async def verify_eligibility(request: VerifyEligibilityRequest):
     try:
         patient = None
         with db.get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM patients WHERE id = ?", (request.patient_id,))
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute("SELECT name FROM patients WHERE id = %s", (request.patient_id,))
             row = cursor.fetchone()
             if row:
                 patient = row['name']
