@@ -56,6 +56,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---- Email helper (Resend – free tier: 100 emails/day) ----
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")  # optional – emails silently skipped if unset
+
+def send_credentials_email(to_email: str, patient_name: str, username: str, password: str) -> bool:
+    """Send login credentials to a new patient via Resend. Returns True on success."""
+    if not RESEND_API_KEY:
+        return False
+    try:
+        import requests as _req
+        resp = _req.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": os.getenv("EMAIL_FROM", "MedEase <onboarding@resend.dev>"),
+                "to": [to_email],
+                "subject": "Welcome to MedEase – Your Login Credentials",
+                "html": (
+                    f"<h2>Welcome to MedEase, {patient_name}!</h2>"
+                    f"<p>Your patient portal account has been created. Use the credentials below to log in:</p>"
+                    f"<table style='border-collapse:collapse;margin:16px 0'>"
+                    f"<tr><td style='padding:8px 16px;background:#f3f4f6;font-weight:600'>Username</td>"
+                    f"<td style='padding:8px 16px;background:#f3f4f6;font-family:monospace'>{username}</td></tr>"
+                    f"<tr><td style='padding:8px 16px;font-weight:600'>Temporary Password</td>"
+                    f"<td style='padding:8px 16px;font-family:monospace'>{password}</td></tr>"
+                    f"</table>"
+                    f"<p style='color:#6b7280;font-size:13px'>Please change your password after your first login.</p>"
+                ),
+            },
+            timeout=10,
+        )
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
 # Configure Gemini API
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
@@ -170,6 +208,7 @@ class StartConsultationRequest(BaseModel):
 class CreatePatientRequest(BaseModel):
     name: str
     date_of_birth: Optional[str] = None
+    email: Optional[str] = None
 
 
 class SaveSummaryRequest(BaseModel):
@@ -826,10 +865,46 @@ async def get_patient(patient_id: int):
 
 @app.post("/api/patients")
 async def create_patient(request: CreatePatientRequest):
-    """Create a new patient."""
+    """Create a new patient with auto-generated login credentials."""
     try:
-        patient_id = db.create_patient(request.name, request.date_of_birth)
-        return JSONResponse(content={"id": patient_id, "name": request.name})
+        import hashlib, random as _rand
+
+        # Generate credentials from name
+        name_parts = request.name.strip().split()
+        first = name_parts[0].lower() if name_parts else "patient"
+        last = name_parts[-1].lower() if len(name_parts) > 1 else ""
+        username = f"{first}.{last}" if last else first
+        password = f"{first}123"
+
+        # Check if username exists, append number if so
+        with db.get_db() as conn:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute("SELECT id FROM patients WHERE username = %s", (username,))
+            if cursor.fetchone():
+                username = f"{username}{_rand.randint(1, 99)}"
+
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+        # Create patient with credentials
+        with db.get_db() as conn:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute("""
+                INSERT INTO patients (name, date_of_birth, email, username, password_hash)
+                VALUES (%s, %s, %s, %s, %s) RETURNING id
+            """, (request.name, request.date_of_birth, request.email, username, password_hash))
+            patient_id = cursor.fetchone()['id']
+
+        # Send welcome email with credentials if email provided
+        email_sent = False
+        if request.email:
+            email_sent = send_credentials_email(request.email, request.name, username, password)
+
+        return JSONResponse(content={
+            "id": patient_id,
+            "name": request.name,
+            "credentials": {"username": username, "password": password},
+            "email_sent": email_sent
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating patient: {str(e)}")
 
@@ -862,12 +937,34 @@ async def get_summary_detail(summary_id: int):
 async def save_summary(request: SaveSummaryRequest):
     """Save a summary to the database with all related data."""
     try:
-        # Find or create patient
+        # Find or create patient (auto-generate credentials for new patients)
         patient = db.get_patient_by_name(request.patient_name)
+        credentials = None
         if patient:
             patient_id = patient["id"]
         else:
-            patient_id = db.create_patient(request.patient_name)
+            import hashlib, random as _rand
+            name_parts = request.patient_name.strip().split()
+            first = name_parts[0].lower() if name_parts else "patient"
+            last = name_parts[-1].lower() if len(name_parts) > 1 else ""
+            username = f"{first}.{last}" if last else first
+            password = f"{first}123"
+
+            with db.get_db() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("SELECT id FROM patients WHERE username = %s", (username,))
+                if cursor.fetchone():
+                    username = f"{username}{_rand.randint(1, 99)}"
+
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            with db.get_db() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
+                    INSERT INTO patients (name, username, password_hash)
+                    VALUES (%s, %s, %s) RETURNING id
+                """, (request.patient_name, username, password_hash))
+                patient_id = cursor.fetchone()['id']
+            credentials = {"username": username, "password": password}
 
         # Create summary
         summary_id = db.create_summary(
@@ -919,12 +1016,16 @@ async def save_summary(request: SaveSummaryRequest):
         # Log analytics event
         db.log_analytics_event("summary_saved", json.dumps({"summary_id": summary_id, "patient_id": patient_id}))
 
-        return JSONResponse(content={
+        result = {
             "success": True,
             "summary_id": summary_id,
             "patient_id": patient_id,
             "message": "Summary saved successfully"
-        })
+        }
+        if credentials:
+            result["credentials"] = credentials
+
+        return JSONResponse(content=result)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error saving summary: {str(e)}")
@@ -2919,6 +3020,11 @@ async def clinicadmin_register_patient_full(request: RegisterPatientFullRequest)
             group_number=request.group_number
         )
 
+        # Send welcome email if email provided
+        email_sent = False
+        if request.email:
+            email_sent = send_credentials_email(request.email, request.name, username, password)
+
         return JSONResponse(content={
             "success": True,
             "patient_id": patient_id,
@@ -2926,6 +3032,7 @@ async def clinicadmin_register_patient_full(request: RegisterPatientFullRequest)
                 "username": username,
                 "password": password
             },
+            "email_sent": email_sent,
             "message": f"Patient {request.name} registered successfully"
         })
     except HTTPException:

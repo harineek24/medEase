@@ -2,7 +2,6 @@ import { useState } from 'react'
 import {
   Upload,
   Clock,
-  MessageSquare,
   Mic,
   Bell,
   LogOut,
@@ -15,7 +14,7 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { PatientApp } from '@/App'
 
-type PatientView = 'upload' | 'dashboard' | 'history' | 'chat' | 'consult' | 'config' | 'updates' | 'appointments' | 'mystatements' | 'mypayments' | 'myinsurance'
+type PatientView = 'upload' | 'dashboard' | 'history' | 'consult' | 'config' | 'updates' | 'appointments' | 'mystatements' | 'mypayments' | 'myinsurance'
 
 export default function PatientLayout() {
   const [currentView, setCurrentView] = useState<PatientView>('upload')
@@ -24,7 +23,6 @@ export default function PatientLayout() {
   const navItems: Array<{ view: PatientView; icon: typeof Upload; label: string }> = [
     { view: 'upload',    icon: Upload,          label: 'Upload' },
     { view: 'history',   icon: Clock,            label: 'History' },
-    { view: 'chat',      icon: MessageSquare,    label: 'AI Chat' },
     { view: 'consult',   icon: Mic,              label: 'Live Consult' },
     { view: 'updates',      icon: Bell,             label: 'Updates' },
     { view: 'appointments', icon: CalendarPlus,     label: 'Book Appt' },

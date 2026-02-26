@@ -9,6 +9,7 @@ import DoctorHistory from '@/components/doctor/DoctorHistory'
 import DoctorCalendar from '@/components/doctor/DoctorCalendar'
 import DoctorFeed from '@/components/doctor/DoctorFeed'
 import DoctorReplyPage from '@/components/doctor/DoctorReplyPage'
+import GeneralChat from '@/components/GeneralChat'
 import AdminPatientRegistration from '@/components/clinicadmin/AdminPatientRegistration'
 import AdminDoctorManagement from '@/components/clinicadmin/AdminDoctorManagement'
 import BillingDashboard from '@/components/clinicadmin/BillingDashboard'
@@ -93,6 +94,7 @@ export default function AppRouter() {
         <Route index element={<DoctorFeed />} />
         <Route path="reply/:updateId" element={<DoctorReplyPage />} />
         <Route path="history" element={<DoctorHistory />} />
+        <Route path="chat" element={<GeneralChat />} />
         <Route path="calendar" element={<DoctorCalendar />} />
         <Route path="consultconfig" element={<ConsultConfig />} />
       </Route>
