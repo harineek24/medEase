@@ -48,7 +48,7 @@ interface Credentials {
 }
 
 interface FormData {
-  full_name: string;
+  name: string;
   date_of_birth: string;
   email: string;
   phone: string;
@@ -65,7 +65,7 @@ interface FormErrors {
 }
 
 const INITIAL_FORM: FormData = {
-  full_name: "",
+  name: "",
   date_of_birth: "",
   email: "",
   phone: "",
@@ -84,10 +84,10 @@ const PHONE_RE = /^\+?[\d\s\-().]{7,20}$/;
 function validateForm(data: FormData): FormErrors {
   const errors: FormErrors = {};
 
-  if (!data.full_name.trim()) {
-    errors.full_name = "Full name is required";
-  } else if (data.full_name.trim().length < 2) {
-    errors.full_name = "Name must be at least 2 characters";
+  if (!data.name.trim()) {
+    errors.name = "Full name is required";
+  } else if (data.name.trim().length < 2) {
+    errors.name = "Name must be at least 2 characters";
   }
 
   if (!data.date_of_birth) {
@@ -408,7 +408,7 @@ export default function AdminPatientRegistration() {
 
       if (data.success && data.credentials) {
         setCredentials(data.credentials);
-        setRegisteredName(form.full_name);
+        setRegisteredName(form.name);
         setForm(INITIAL_FORM);
         setErrors({});
         // Refresh the patient list
@@ -518,22 +518,22 @@ export default function AdminPatientRegistration() {
           <div className="grid gap-4 sm:grid-cols-2">
             {/* Full Name */}
             <div>
-              <label htmlFor="full_name" className={labelClasses}>
+              <label htmlFor="name" className={labelClasses}>
                 Full Name <span className="text-red-400">*</span>
               </label>
               <input
-                id="full_name"
-                name="full_name"
+                id="name"
+                name="name"
                 type="text"
-                value={form.full_name}
+                value={form.name}
                 onChange={handleChange}
                 placeholder="John Doe"
-                className={fieldClasses("full_name")}
+                className={fieldClasses("name")}
                 autoComplete="name"
               />
-              {errors.full_name && (
+              {errors.name && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-red-500">
-                  <AlertCircle size={12} /> {errors.full_name}
+                  <AlertCircle size={12} /> {errors.name}
                 </p>
               )}
             </div>
