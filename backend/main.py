@@ -2217,7 +2217,7 @@ class PatientUpdateRequest(BaseModel):
 
 
 class RegisterPatientFullRequest(BaseModel):
-    name: str
+    full_name: str
     date_of_birth: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
