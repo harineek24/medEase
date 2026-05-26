@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { API_BASE_URL } from '../../api'
+import { useAuth } from '../../contexts/AuthContext'
 import {
   Mic,
   Square,
@@ -25,6 +26,7 @@ interface Update {
 
 // ─── Component ─────────────────────────────────────────────────────────
 export default function PatientUpdates() {
+  const { patientId } = useAuth()
   const [input, setInput] = useState('')
   const [updates, setUpdates] = useState<Update[]>([])
   const [loading, setLoading] = useState(true)
@@ -44,7 +46,7 @@ export default function PatientUpdates() {
   // Fetch existing updates
   const fetchUpdates = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/patient-updates/1`)
+      const res = await fetch(`${API_BASE_URL}/api/patient-updates/${patientId ?? 1}`)
       if (res.ok) {
         const data = await res.json()
         setUpdates(Array.isArray(data) ? data : [])
@@ -54,7 +56,7 @@ export default function PatientUpdates() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [patientId])
 
   useEffect(() => { fetchUpdates() }, [fetchUpdates])
 
@@ -145,7 +147,7 @@ export default function PatientUpdates() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          patient_id: 1,
+          patient_id: patientId ?? 1,
           update_text: input.trim(),
           audio_duration: recordTime > 0 ? recordTime : null,
           audio_url: audioUrl,

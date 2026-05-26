@@ -910,10 +910,10 @@ async def create_patient(request: CreatePatientRequest):
 
 
 @app.get("/api/history")
-async def get_history(limit: int = 50):
-    """Get all summaries with patient info for history view."""
+async def get_history(limit: int = 50, patient_id: Optional[int] = None):
+    """Get summaries for history view, filtered by patient when provided."""
     try:
-        summaries = db.get_all_summaries(limit)
+        summaries = db.get_all_summaries(limit, patient_id)
         return JSONResponse(content={"summaries": summaries, "count": len(summaries)})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting history: {str(e)}")
@@ -2843,30 +2843,30 @@ async def portal_patient_insurance(patient_id: int):
 
 
 @app.get("/api/medications/timeline")
-async def get_medications_timeline():
-    """Get all medications grouped by summary/visit for timeline comparison."""
+async def get_medications_timeline(patient_id: Optional[int] = None):
+    """Get medications grouped by summary/visit for timeline comparison, filtered by patient when provided."""
     try:
-        timeline = db.get_medications_timeline()
+        timeline = db.get_medications_timeline(patient_id)
         return JSONResponse(content=timeline)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching medications timeline: {str(e)}")
 
 
 @app.get("/api/test-results/history/{test_name}")
-async def get_test_history(test_name: str):
-    """Get historical readings for a specific test result across all uploads."""
+async def get_test_history(test_name: str, patient_id: Optional[int] = None):
+    """Get historical readings for a specific test result, filtered by patient when provided."""
     try:
-        history = db.get_test_result_history(test_name)
+        history = db.get_test_result_history(test_name, patient_id)
         return JSONResponse(content=history)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching test history: {str(e)}")
 
 
 @app.get("/api/test-results/names")
-async def get_test_names():
-    """Get all distinct test result names stored."""
+async def get_test_names(patient_id: Optional[int] = None):
+    """Get distinct test result names, filtered by patient when provided."""
     try:
-        names = db.get_all_test_names()
+        names = db.get_all_test_names(patient_id)
         return JSONResponse(content=names)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching test names: {str(e)}")

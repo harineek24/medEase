@@ -288,14 +288,16 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
 
   // ─── Data fetching ─────────────────────────────────────────────────
   useEffect(() => {
+    setHistoryCache({})
     const load = async () => {
       setLoading(true)
+      const pid = patientId ?? 1
       try {
         const [namesRes, summRes, medRes, consultRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/test-results/names`),
-          fetch(`${API_BASE_URL}/api/history?limit=50`),
-          fetch(`${API_BASE_URL}/api/medications/timeline`),
-          fetch(`${API_BASE_URL}/api/patient/${patientId ?? 1}/consultations`),
+          fetch(`${API_BASE_URL}/api/test-results/names?patient_id=${pid}`),
+          fetch(`${API_BASE_URL}/api/history?limit=50&patient_id=${pid}`),
+          fetch(`${API_BASE_URL}/api/medications/timeline?patient_id=${pid}`),
+          fetch(`${API_BASE_URL}/api/patient/${pid}/consultations`),
         ])
         if (namesRes.ok) {
           const names: TestName[] = await namesRes.json()
@@ -321,12 +323,13 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
       }
     }
     load()
-  }, [])
+  }, [patientId])
 
   const fetchHistory = useCallback(async (testName: string) => {
     if (historyCache[testName]) return
     try {
-      const res = await fetch(`${API_BASE_URL}/api/test-results/history/${encodeURIComponent(testName)}`)
+      const pid = patientId ?? 1
+      const res = await fetch(`${API_BASE_URL}/api/test-results/history/${encodeURIComponent(testName)}?patient_id=${pid}`)
       if (res.ok) {
         const data: HistoryPoint[] = await res.json()
         setHistoryCache(prev => ({ ...prev, [testName]: data }))
@@ -334,7 +337,7 @@ export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
     } catch {
       // silent
     }
-  }, [historyCache])
+  }, [historyCache, patientId])
 
   const openDetail = useCallback(async (testName: string) => {
     setSelectedTest(testName)

@@ -1368,17 +1368,27 @@ def get_patient_summaries(patient_id: int) -> List[Dict]:
         return [_serialize_row(row) for row in cursor.fetchall()]
 
 
-def get_all_summaries(limit: int = 50) -> List[Dict]:
-    """Get all summaries with patient info."""
+def get_all_summaries(limit: int = 50, patient_id: int = None) -> List[Dict]:
+    """Get all summaries with patient info, optionally filtered by patient."""
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("""
-            SELECT s.*, p.name as patient_name
-            FROM summaries s
-            LEFT JOIN patients p ON s.patient_id = p.id
-            ORDER BY s.created_at DESC
-            LIMIT %s
-        """, (limit,))
+        if patient_id:
+            cursor.execute("""
+                SELECT s.*, p.name as patient_name
+                FROM summaries s
+                LEFT JOIN patients p ON s.patient_id = p.id
+                WHERE s.patient_id = %s
+                ORDER BY s.created_at DESC
+                LIMIT %s
+            """, (patient_id, limit))
+        else:
+            cursor.execute("""
+                SELECT s.*, p.name as patient_name
+                FROM summaries s
+                LEFT JOIN patients p ON s.patient_id = p.id
+                ORDER BY s.created_at DESC
+                LIMIT %s
+            """, (limit,))
         return [_serialize_row(row) for row in cursor.fetchall()]
 
 
@@ -1425,18 +1435,29 @@ def get_all_medications() -> List[Dict]:
         return [_serialize_row(row) for row in cursor.fetchall()]
 
 
-def get_medications_timeline() -> List[Dict]:
+def get_medications_timeline(patient_id: int = None) -> List[Dict]:
     """Get all medications grouped by summary with visit dates for timeline view."""
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("""
-            SELECT DISTINCT s.id as summary_id, s.visit_date, s.created_at,
-                   s.diagnosis, p.name as patient_name, s.original_filename
-            FROM summaries s
-            JOIN medications m ON m.summary_id = s.id
-            LEFT JOIN patients p ON s.patient_id = p.id
-            ORDER BY s.created_at ASC
-        """)
+        if patient_id:
+            cursor.execute("""
+                SELECT DISTINCT s.id as summary_id, s.visit_date, s.created_at,
+                       s.diagnosis, p.name as patient_name, s.original_filename
+                FROM summaries s
+                JOIN medications m ON m.summary_id = s.id
+                LEFT JOIN patients p ON s.patient_id = p.id
+                WHERE s.patient_id = %s
+                ORDER BY s.created_at ASC
+            """, (patient_id,))
+        else:
+            cursor.execute("""
+                SELECT DISTINCT s.id as summary_id, s.visit_date, s.created_at,
+                       s.diagnosis, p.name as patient_name, s.original_filename
+                FROM summaries s
+                JOIN medications m ON m.summary_id = s.id
+                LEFT JOIN patients p ON s.patient_id = p.id
+                ORDER BY s.created_at ASC
+            """)
         summaries = [_serialize_row(row) for row in cursor.fetchall()]
 
         for summary in summaries:
@@ -1474,35 +1495,59 @@ def add_test_result(
         return cursor.fetchone()['id']
 
 
-def get_test_result_history(test_name: str) -> list:
+def get_test_result_history(test_name: str, patient_id: int = None) -> list:
     """Get historical readings for a specific test across all summaries."""
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("""
-            SELECT tr.id, tr.test_name, tr.value, tr.unit, tr.status,
-                   tr.reference_range, tr.created_at,
-                   s.original_filename, s.visit_date
-            FROM test_results tr
-            JOIN summaries s ON s.id = tr.summary_id
-            WHERE LOWER(tr.test_name) LIKE LOWER(%s)
-            ORDER BY tr.created_at ASC
-        """, (f"%{test_name}%",))
+        if patient_id:
+            cursor.execute("""
+                SELECT tr.id, tr.test_name, tr.value, tr.unit, tr.status,
+                       tr.reference_range, tr.created_at,
+                       s.original_filename, s.visit_date
+                FROM test_results tr
+                JOIN summaries s ON s.id = tr.summary_id
+                WHERE LOWER(tr.test_name) LIKE LOWER(%s) AND s.patient_id = %s
+                ORDER BY tr.created_at ASC
+            """, (f"%{test_name}%", patient_id))
+        else:
+            cursor.execute("""
+                SELECT tr.id, tr.test_name, tr.value, tr.unit, tr.status,
+                       tr.reference_range, tr.created_at,
+                       s.original_filename, s.visit_date
+                FROM test_results tr
+                JOIN summaries s ON s.id = tr.summary_id
+                WHERE LOWER(tr.test_name) LIKE LOWER(%s)
+                ORDER BY tr.created_at ASC
+            """, (f"%{test_name}%",))
         return [_serialize_row(row) for row in cursor.fetchall()]
 
 
-def get_all_test_names() -> list:
+def get_all_test_names(patient_id: int = None) -> list:
     """Get all distinct test names stored in the database."""
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("""
-            SELECT test_name, status, latest_at FROM (
-                SELECT DISTINCT ON (LOWER(test_name)) test_name, status,
-                       created_at as latest_at
-                FROM test_results
-                ORDER BY LOWER(test_name), created_at DESC
-            ) sub
-            ORDER BY latest_at DESC
-        """)
+        if patient_id:
+            cursor.execute("""
+                SELECT test_name, status, latest_at FROM (
+                    SELECT DISTINCT ON (LOWER(tr.test_name)) tr.test_name, tr.status,
+                           tr.created_at as latest_at
+                    FROM test_results tr
+                    JOIN summaries s ON s.id = tr.summary_id
+                    WHERE s.patient_id = %s
+                    ORDER BY LOWER(tr.test_name), tr.created_at DESC
+                ) sub
+                ORDER BY latest_at DESC
+            """, (patient_id,))
+        else:
+            cursor.execute("""
+                SELECT test_name, status, latest_at FROM (
+                    SELECT DISTINCT ON (LOWER(test_name)) test_name, status,
+                           created_at as latest_at
+                    FROM test_results
+                    ORDER BY LOWER(test_name), created_at DESC
+                ) sub
+                ORDER BY latest_at DESC
+            """)
         return [_serialize_row(row) for row in cursor.fetchall()]
 
 
