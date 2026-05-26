@@ -618,6 +618,9 @@ export default function LoginPage() {
               <p className="text-xs text-gray-400 mt-2 text-center">
                 Your clinic admin will provide your login credentials.
               </p>
+              <p className="text-xs text-gray-400 mt-1 text-center">
+                Demo: Clinic "Sunrise Community Health Center" · sarah.chen / sarah123
+              </p>
             </div>
           )}
 
