@@ -77,6 +77,7 @@ type HealthTimeRange = '1d' | '1w' | '1m' | '1y' | 'all'
 
 interface HealthHistoryProps {
   onNavigate: (view: string) => void
+  patientId?: number
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -261,8 +262,9 @@ function Sparkline({ values, color = '#8BC34A' }: { values: number[]; color?: st
 }
 
 // ─── Main Component ──────────────────────────────────────────────────
-export default function HealthHistory({ onNavigate }: HealthHistoryProps) {
-  const { patientId } = useAuth()
+export default function HealthHistory({ onNavigate, patientId: patientIdProp }: HealthHistoryProps) {
+  const { patientId: authPatientId } = useAuth()
+  const patientId = patientIdProp ?? authPatientId
 
   // Data
   const [testNames, setTestNames] = useState<TestName[]>([])

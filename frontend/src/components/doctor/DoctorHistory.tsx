@@ -152,7 +152,7 @@ export default function DoctorHistory() {
         </div>
 
         <div className="p-6">
-          <HealthHistory onNavigate={() => {}} />
+          <HealthHistory onNavigate={() => {}} patientId={selectedPatient.id} />
         </div>
       </div>
     )
