@@ -626,6 +626,8 @@ def init_database():
 def _migrate_doctors_table(cursor):
     """Add new columns to doctors table if they don't exist."""
     new_columns = [
+        ("username", "TEXT"),
+        ("password_hash", "TEXT"),
         ("consultation_fee", "DOUBLE PRECISION DEFAULT 150"),
         ("rating", "DOUBLE PRECISION DEFAULT 4.5"),
         ("review_count", "INTEGER DEFAULT 0"),
@@ -636,6 +638,20 @@ def _migrate_doctors_table(cursor):
     ]
     for col_name, col_type in new_columns:
         cursor.execute(f"ALTER TABLE doctors ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
+
+    # Backfill username and password_hash for existing doctors that have none
+    import hashlib
+    cursor.execute("SELECT id, first_name, last_name FROM doctors WHERE username IS NULL")
+    rows = cursor.fetchall()
+    for row in rows:
+        first = row['first_name'].lower()
+        last = row['last_name'].lower()
+        username = f"{first}.{last}"
+        pw_hash = hashlib.sha256(f"{first}123".encode()).hexdigest()
+        cursor.execute(
+            "UPDATE doctors SET username = %s, password_hash = %s WHERE id = %s",
+            (username, pw_hash, row['id'])
+        )
 
 
 def _ensure_doctor_extras(cursor):
