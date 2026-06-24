@@ -1,5 +1,6 @@
 import os
 import base64
+import hashlib
 import json
 import asyncio
 from datetime import datetime
@@ -224,6 +225,7 @@ class SaveSummaryRequest(BaseModel):
     medications: List[Dict[str, Any]] = []
     test_results: List[Dict[str, Any]] = []
     interactions: List[Dict[str, Any]] = []
+    file_hash: Optional[str] = None
 
 
 def get_mime_type(filename: str) -> str:
@@ -301,6 +303,57 @@ Be clear and direct]
 - Focus on actionable guidance for the patient
 
 Now, please analyze the provided medical document and create the summary following this exact format."""
+
+
+def create_consolidated_ehr_prompt() -> str:
+    """
+    Single prompt that produces the patient-friendly summary AND the
+    structured extraction (overview, medications, test results) in one
+    Gemini call, instead of four separate calls.
+    """
+    return create_ehr_prompt() + """
+
+---
+
+After writing the summary above, ALSO return a single JSON object (and nothing else after it) with this exact shape:
+
+{
+  "summary": "<the full markdown summary you just wrote, identical text, as one JSON string>",
+  "patient_overview": {
+    "patient_name": "name or null",
+    "visit_date": "date or null",
+    "hospital": "hospital name or null",
+    "visit_type": "visit type or null"
+  },
+  "medications": [
+    {"name": "Medication Name", "dosage": "10mg", "frequency": "once daily", "purpose": "condition"}
+  ],
+  "test_results": [
+    {"name": "WBC", "value": "9.5", "unit": "x10^9/L", "reference_range": "4.0-11.0 x10^9/L", "status": "normal", "explanation": "White blood cell count is normal"}
+  ]
+}
+
+Rules for the JSON:
+- Output ONLY the JSON object, no markdown code fences, no extra commentary, nothing before or after it.
+- "summary" must contain the complete markdown summary as a properly escaped JSON string (escape newlines as \\n).
+- "medications" must list every medication found, or [] if none.
+- "test_results" must list every individual test result found (never grouped), or [] if none.
+- Use null for any patient_overview field not found. Do not invent data.
+"""
+
+
+def parse_json_response(text: str) -> Any:
+    """Strip optional markdown code fences from a Gemini response and parse JSON."""
+    cleaned = text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned.replace("```json", "", 1).strip()
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+    elif cleaned.startswith("```"):
+        cleaned = cleaned.replace("```", "", 1).strip()
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+    return json.loads(cleaned)
 
 
 def extract_patient_name(summary: str) -> Optional[str]:
@@ -419,6 +472,19 @@ async def summarize_ehr(file: UploadFile = File(...)):
                 detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024):.0f}MB"
             )
 
+        # Dedup check: identical file bytes already processed before?
+        file_hash = hashlib.sha256(file_content).hexdigest()
+        cached = db.get_processed_document_by_file_hash(file_hash)
+        if cached:
+            return JSONResponse(content={
+                "summary": cached["summary"],
+                "markdown_path": cached["markdown_path"],
+                "patient_name": cached["patient_name"],
+                "date_processed": datetime.now().isoformat(),
+                "file_hash": file_hash,
+                "duplicate": True
+            })
+
         # Convert to base64
         file_base64 = base64.b64encode(file_content).decode('utf-8')
         mime_type = get_mime_type(file.filename)
@@ -429,30 +495,51 @@ async def summarize_ehr(file: UploadFile = File(...)):
             'data': file_base64
         }
 
-        # Generate summary using Gemini
-        prompt = create_ehr_prompt()
+        # Single consolidated Gemini call: summary + overview + medications +
+        # test results, instead of 4 separate calls.
+        prompt = create_consolidated_ehr_prompt()
 
         try:
             response = model.generate_content([prompt, file_data])
-            summary = response.text
+            parsed = parse_json_response(response.text)
+            summary = parsed["summary"]
+            patient_overview = parsed.get("patient_overview") or {}
+            medications = parsed.get("medications") or []
+            test_results = parsed.get("test_results") or []
         except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail=f"Error generating summary with Gemini API: {str(e)}"
             )
 
-        # Extract patient name from summary
-        patient_name = extract_patient_name(summary)
+        # Extract patient name (prefer structured overview, fall back to heuristic)
+        patient_name = patient_overview.get("patient_name") or extract_patient_name(summary)
 
         # Save markdown file
         markdown_path = save_markdown(summary, patient_name)
+
+        # Cache the full result, keyed by file hash and by summary text hash
+        # (the latter lets the extract-* endpoints serve from cache too).
+        summary_hash = hashlib.sha256(summary.encode("utf-8")).hexdigest()
+        db.save_processed_document(
+            file_hash=file_hash,
+            summary_hash=summary_hash,
+            summary=summary,
+            patient_name=patient_name,
+            markdown_path=markdown_path,
+            patient_overview=patient_overview,
+            medications=medications,
+            test_results=test_results
+        )
 
         # Return response
         return JSONResponse(content={
             "summary": summary,
             "markdown_path": markdown_path,
             "patient_name": patient_name,
-            "date_processed": datetime.now().isoformat()
+            "date_processed": datetime.now().isoformat(),
+            "file_hash": file_hash,
+            "duplicate": False
         })
 
     except HTTPException:
@@ -522,6 +609,16 @@ async def extract_medications(request: ExtractMedicationsRequest):
     Returns: List of medications with name, dosage, frequency, and purpose
     """
     try:
+        # Serve from cache if this summary was already processed by /api/summarize
+        summary_hash = hashlib.sha256(request.summary.encode("utf-8")).hexdigest()
+        cached = db.get_processed_document_by_summary_hash(summary_hash)
+        if cached and cached.get("medications") is not None:
+            medications = cached["medications"]
+            return JSONResponse(content={
+                "medications": medications,
+                "count": len(medications)
+            })
+
         prompt = """Analyze the following medical summary and extract ALL medications mentioned.
 
 For each medication, extract:
@@ -584,6 +681,11 @@ async def extract_patient_overview(request: ExtractMedicationsRequest):
     Returns: Patient name, visit date, hospital, and visit type
     """
     try:
+        summary_hash = hashlib.sha256(request.summary.encode("utf-8")).hexdigest()
+        cached = db.get_processed_document_by_summary_hash(summary_hash)
+        if cached and cached.get("patient_overview") is not None:
+            return JSONResponse(content=cached["patient_overview"])
+
         prompt = """Analyze the following medical summary and extract patient overview information.
 
 Extract the following fields if present:
@@ -643,6 +745,15 @@ async def extract_test_results(request: ExtractMedicationsRequest):
     Returns: List of test results with name, value, status, and explanation
     """
     try:
+        summary_hash = hashlib.sha256(request.summary.encode("utf-8")).hexdigest()
+        cached = db.get_processed_document_by_summary_hash(summary_hash)
+        if cached and cached.get("test_results") is not None:
+            test_results = cached["test_results"]
+            return JSONResponse(content={
+                "test_results": test_results,
+                "count": len(test_results)
+            })
+
         prompt = """Analyze the following medical summary and extract ALL test results mentioned.
 
 CRITICAL: Extract each test result as its OWN separate entry. NEVER combine or group tests.
@@ -937,6 +1048,19 @@ async def get_summary_detail(summary_id: int):
 async def save_summary(request: SaveSummaryRequest):
     """Save a summary to the database with all related data."""
     try:
+        # Dedup: if this exact file was already saved, return the existing record
+        # instead of inserting a duplicate (handles double-submits/duplicate uploads).
+        if request.file_hash:
+            existing = db.get_summary_by_file_hash(request.file_hash)
+            if existing:
+                return JSONResponse(content={
+                    "success": True,
+                    "summary_id": existing["id"],
+                    "patient_id": existing["patient_id"],
+                    "message": "Summary already saved (duplicate upload)",
+                    "duplicate": True
+                })
+
         # Find or create patient (auto-generate credentials for new patients)
         patient = db.get_patient_by_name(request.patient_name)
         credentials = None
@@ -976,7 +1100,8 @@ async def save_summary(request: SaveSummaryRequest):
             visit_date=request.visit_date,
             visit_location=request.visit_location,
             next_steps=request.next_steps,
-            warning_signs=request.warning_signs
+            warning_signs=request.warning_signs,
+            file_hash=request.file_hash
         )
 
         # Add medications

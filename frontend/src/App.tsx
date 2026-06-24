@@ -31,6 +31,7 @@ interface SummaryData {
   markdown_path: string
   patient_name: string
   date_processed: string
+  file_hash?: string
 }
 
 interface Medication {
@@ -255,7 +256,8 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
             status: t.status,
             explanation: t.explanation
           })),
-          interactions: interactions
+          interactions: interactions,
+          file_hash: summaryData.file_hash
         }),
       })
 
@@ -406,7 +408,8 @@ export function PatientApp({ currentView, onNavigate }: PatientAppProps) {
               visit_location: null,
               medications: extractedMeds,
               test_results: extractedTests,
-              interactions: extractedInteractions
+              interactions: extractedInteractions,
+              file_hash: summaryData.file_hash
             }),
           })
           setSaveStatus('saved')

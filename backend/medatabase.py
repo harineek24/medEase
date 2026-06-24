@@ -143,6 +143,25 @@ def init_database():
             )
         """)
 
+        # Processed documents table - caches the single consolidated Gemini
+        # response per uploaded file (by content hash) and per generated
+        # summary text (by summary hash), so re-uploads and the extract-*
+        # endpoints never need to call Gemini again for the same content.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS processed_documents (
+                id SERIAL PRIMARY KEY,
+                file_hash TEXT UNIQUE NOT NULL,
+                summary_hash TEXT UNIQUE,
+                summary TEXT NOT NULL,
+                patient_name TEXT,
+                markdown_path TEXT,
+                patient_overview JSONB,
+                medications JSONB,
+                test_results JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # Chat messages table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS chat_messages (
@@ -616,11 +635,23 @@ def init_database():
         # Migrate: add new doctor columns if missing
         _migrate_doctors_table(cursor)
 
+        # Migrate: add file_hash column to summaries for upload dedup
+        _migrate_summaries_table(cursor)
+
         # Seed sample data if tables are empty
         _seed_sample_data(cursor)
 
         # Ensure doctor availability/extras are always populated
         _ensure_doctor_extras(cursor)
+
+
+def _migrate_summaries_table(cursor):
+    """Add file_hash column to summaries table for upload dedup, if missing."""
+    cursor.execute("ALTER TABLE summaries ADD COLUMN IF NOT EXISTS file_hash TEXT")
+    cursor.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_summaries_file_hash "
+        "ON summaries(file_hash) WHERE file_hash IS NOT NULL"
+    )
 
 
 def _migrate_doctors_table(cursor):
@@ -1314,7 +1345,8 @@ def create_summary(
     visit_date: Optional[str] = None,
     visit_location: Optional[str] = None,
     next_steps: Optional[str] = None,
-    warning_signs: Optional[str] = None
+    warning_signs: Optional[str] = None,
+    file_hash: Optional[str] = None
 ) -> int:
     """Create a new summary and return its ID."""
     with get_db() as conn:
@@ -1322,11 +1354,76 @@ def create_summary(
         cursor.execute("""
             INSERT INTO summaries
             (patient_id, raw_summary, file_path, original_filename, diagnosis,
-             visit_date, visit_location, next_steps, warning_signs)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+             visit_date, visit_location, next_steps, warning_signs, file_hash)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
         """, (patient_id, raw_summary, file_path, original_filename, diagnosis,
-              visit_date, visit_location, next_steps, warning_signs))
+              visit_date, visit_location, next_steps, warning_signs, file_hash))
         return cursor.fetchone()['id']
+
+
+def get_summary_by_file_hash(file_hash: str) -> Optional[Dict]:
+    """Look up an already-saved summary by uploaded file content hash (dedup check)."""
+    if not file_hash:
+        return None
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT * FROM summaries WHERE file_hash = %s", (file_hash,))
+        row = cursor.fetchone()
+        return _serialize_row(row) if row else None
+
+
+# =============================================================================
+# Processed Document Cache (collapses repeated Gemini calls per document)
+# =============================================================================
+
+def get_processed_document_by_file_hash(file_hash: str) -> Optional[Dict]:
+    """Look up a fully-processed document by uploaded file content hash."""
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT * FROM processed_documents WHERE file_hash = %s", (file_hash,))
+        row = cursor.fetchone()
+        return _serialize_row(row) if row else None
+
+
+def get_processed_document_by_summary_hash(summary_hash: str) -> Optional[Dict]:
+    """Look up a fully-processed document by generated summary text hash."""
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT * FROM processed_documents WHERE summary_hash = %s", (summary_hash,))
+        row = cursor.fetchone()
+        return _serialize_row(row) if row else None
+
+
+def save_processed_document(
+    file_hash: str,
+    summary_hash: str,
+    summary: str,
+    patient_name: Optional[str],
+    markdown_path: Optional[str],
+    patient_overview: Dict[str, Any],
+    medications: List[Dict[str, Any]],
+    test_results: List[Dict[str, Any]]
+) -> None:
+    """Cache the consolidated Gemini result for a document, keyed by file and summary hash."""
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            INSERT INTO processed_documents
+            (file_hash, summary_hash, summary, patient_name, markdown_path,
+             patient_overview, medications, test_results)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (file_hash) DO UPDATE SET
+                summary_hash = EXCLUDED.summary_hash,
+                summary = EXCLUDED.summary,
+                patient_name = EXCLUDED.patient_name,
+                markdown_path = EXCLUDED.markdown_path,
+                patient_overview = EXCLUDED.patient_overview,
+                medications = EXCLUDED.medications,
+                test_results = EXCLUDED.test_results
+        """, (
+            file_hash, summary_hash, summary, patient_name, markdown_path,
+            json.dumps(patient_overview), json.dumps(medications), json.dumps(test_results)
+        ))
 
 
 def get_summary(summary_id: int) -> Optional[Dict]:
