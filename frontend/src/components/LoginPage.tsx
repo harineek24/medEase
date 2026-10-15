@@ -109,6 +109,7 @@ export default function LoginPage() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: adminUsername, password: adminPassword }),
       })
@@ -122,7 +123,7 @@ export default function LoginPage() {
       login({
         role: 'clinicadmin',
         user: data.user || { username: adminUsername },
-        clinicId: data.clinic_id || 1,
+        clinicId: data.user.clinic_id,
       })
       navigate('/clinicadmin')
     } catch (err) {
@@ -141,6 +142,7 @@ export default function LoginPage() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/doctor/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: doctorUsername,
@@ -159,6 +161,7 @@ export default function LoginPage() {
         role: 'doctor',
         user: data.user,
         doctorId: data.user.id,
+        clinicId: data.user.clinic_id,
       })
       navigate('/doctor')
     } catch (err) {
@@ -233,6 +236,7 @@ export default function LoginPage() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/patient/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: patientUsername, password: patientPassword }),
       })
@@ -518,9 +522,6 @@ export default function LoginPage() {
                   {adminLoading ? 'Signing in...' : 'Sign In'}
                 </button>
               </form>
-              <p className="text-xs text-gray-400 mt-3 text-center">
-                Default: admin / admin123
-              </p>
             </div>
           )}
 
@@ -617,9 +618,6 @@ export default function LoginPage() {
               </button>
               <p className="text-xs text-gray-400 mt-2 text-center">
                 Your clinic admin will provide your login credentials.
-              </p>
-              <p className="text-xs text-gray-400 mt-1 text-center">
-                Demo: Clinic "Sunrise Community Health Center" · sarah.chen / sarah123
               </p>
             </div>
           )}

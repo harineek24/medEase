@@ -946,24 +946,15 @@ def _seed_sample_data(cursor):
             VALUES (?, ?, ?, ?, ?)
         """, (svc["clinic_id"], svc["service_name"], svc["category"], svc["duration_minutes"], svc["price"]))
 
-    # Create default admin user (password: admin123 - should be changed!)
-    import hashlib
-    password_hash = hashlib.sha256("admin123".encode()).hexdigest()
-    cursor.execute("""
-        INSERT INTO admin_users (username, password_hash, email, role)
-        VALUES (?, ?, ?, ?)
-    """, ("admin", password_hash, "admin@medease.com", "superadmin"))
+    # Never seed a login with a public demo password. Provision real accounts
+    # through the configured deployment bootstrap or clinic onboarding flow.
 
     # =========================================================================
     # Sample Patients
     # =========================================================================
-    import hashlib as _hl
-
-    # First patient gets login credentials (default test patient)
-    default_pw = _hl.sha256("patient123".encode()).hexdigest()
     cursor.execute(
-        "INSERT INTO patients (name, date_of_birth, username, password_hash, email) VALUES (?, ?, ?, ?, ?)",
-        ("Maria Garcia", "1985-03-14", "maria", default_pw, "maria.garcia@email.com")
+        "INSERT INTO patients (name, date_of_birth, email) VALUES (?, ?, ?)",
+        ("Maria Garcia", "1985-03-14", "maria.garcia@email.com")
     )
 
     # Rest of the patients (no credentials yet - admin registers them later)

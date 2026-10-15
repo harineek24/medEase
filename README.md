@@ -37,8 +37,38 @@ Backend (FastAPI + Python)
        +-- Google Gemini AI (Document analysis, Chat, Summarization)
        +-- Gemini Live API (Real-time voice consultation)
        +-- RxNorm API (Drug database and interaction checking)
-       +-- SQLite (Local storage)
+       +-- PostgreSQL (tenant-scoped application data)
 ```
+
+## Authentication and tenant setup
+
+The API issues opaque, HttpOnly session cookies after role-specific sign-in.
+Patient accounts are shared identities: a patient can be linked to multiple
+clinics, while clinic staff can read that patient's shared record only when
+their clinic has an active `patient_clinics` membership. Existing memberships
+are backfilled only from appointments and doctor-authored notes; other patients
+remain unlinked until they book with a clinic or an administrator registers
+them. Booking is the patient's explicit link to that clinic and gives its staff
+access to the shared profile while the link is active.
+
+For the first deployment, configure `MEDEASE_BOOTSTRAP_ADMIN_USERNAME`, a
+`MEDEASE_BOOTSTRAP_ADMIN_PASSWORD` of at least 14 characters, and
+`MEDEASE_BOOTSTRAP_CLINIC_NAME` in the backend environment. The clinic is
+created only when the database has no clinics, and the administrator only when
+the database has no administrators. Existing deployments can instead provide
+`MEDEASE_BOOTSTRAP_ADMIN_CLINIC_ID`. Fictional seed data is disabled unless
+`MEDEASE_SEED_DEMO_DATA=true`. Set `FRONTEND_URL` to
+the exact production frontend origin and use `ENVIRONMENT=production` so the
+session cookie is Secure. Never deploy the example database URL or bootstrap
+credentials.
+
+Set `RESEND_API_KEY` and `EMAIL_FROM` to enable password-reset and account
+credential emails. Without an email provider, newly provisioned temporary
+credentials are returned to the clinic administrator once.
+
+Credence Cloud authentication is not wired into this repository yet. The
+current password endpoints still issue sessions, so deployments must not treat
+this tenant foundation as enforcement of a Credence-only login policy.
 
 ## API Endpoints
 
@@ -79,7 +109,7 @@ Backend (FastAPI + Python)
 - FastAPI (Python web framework)
 - Google Generative AI SDK (Gemini API)
 - Google GenAI Live API (Real-time voice with function calling)
-- SQLite (Database)
+- PostgreSQL (Database; set `DATABASE_URL`)
 - WebSockets (Bidirectional audio streaming)
 
 **Frontend:**

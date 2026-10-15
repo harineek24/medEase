@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import google.generativeai as genai
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -24,6 +24,8 @@ import medatabase as db
 import psycopg2.extras
 from chat_handler import patient_chat, general_chat, check_quick_response, doctor_consultation, generate_consultation_summary
 from voice_service import voice_service, CONSULTATION_FIELDS, ConsultationConfig, DEFAULT_CONSULTATION_FIELDS, AVAILABLE_VOICES
+from security import SESSION_COOKIE, principal_for_request, issue_session, revoke_session, set_session_cookie
+from tenant_context import set_principal, reset_principal
 
 # Initialize FastAPI app
 app = FastAPI(title="MedEase - EHR Summarizer API")
@@ -34,27 +36,81 @@ allowed_origins = [
     "http://localhost:5173",
 ]
 if os.getenv("FRONTEND_URL"):
-    allowed_origins.append(os.getenv("FRONTEND_URL"))
-
-from fastapi.middleware.cors import CORSMiddleware as _CORSMiddleware
-
-class VercelCORSMiddleware(_CORSMiddleware):
-    """Extends CORS to allow Vercel preview deployment URLs."""
-    def is_allowed_origin(self, origin: str) -> bool:
-        if super().is_allowed_origin(origin):
-            return True
-        # Allow all Vercel preview deployments for this project
-        if origin and ("vercel.app" in origin):
-            return True
-        return False
+    allowed_origins.append(os.getenv("FRONTEND_URL").rstrip("/"))
 
 app.add_middleware(
-    VercelCORSMiddleware,
+    CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_authenticated_api(request: Request, call_next):
+    """Require a server-issued session for application APIs and bind DB scope."""
+    path = request.url.path
+    if request.method == "OPTIONS" or path == "/" or path.startswith(("/docs", "/openapi.json", "/redoc")):
+        return await call_next(request)
+
+    # Validate browser origin before both public and authenticated writes,
+    # including login endpoints that set the session cookie.
+    if request.method not in ("GET", "HEAD"):
+        origin = request.headers.get("origin")
+        if not origin or origin not in allowed_origins:
+            return JSONResponse(status_code=403, content={"detail": "Untrusted request origin"})
+
+    public_paths = {
+        "/api/admin/login", "/api/patient/login", "/api/doctor/login",
+        "/api/patient/forgot-password", "/api/patient/reset-password",
+        "/api/doctor/forgot-password", "/api/doctor/reset-password",
+        "/api/clinics", "/api/doctors", "/api/doctors/search",
+        "/api/doctors/specialties", "/api/doctors/insurance-providers",
+        "/api/codes/icd10", "/api/codes/cpt",
+    }
+    public_doctor_detail = path.startswith("/api/doctors/") and not path.endswith("/available-slots")
+    if path in public_paths or path.startswith("/api/clinics/") or public_doctor_detail:
+        return await call_next(request)
+
+    principal = principal_for_request(request)
+    if principal is None:
+        return JSONResponse(status_code=401, content={"detail": "Sign-in required"})
+
+    required_role = None
+    if path.startswith(("/api/clinicadmin/", "/api/admin/")):
+        required_role = "clinicadmin"
+    elif path.startswith(("/api/doctor/",)):
+        required_role = "doctor"
+    elif path.startswith(("/api/portal/patient/", "/api/patient/")):
+        required_role = "patient"
+    elif path.startswith(("/api/chat/patient", "/api/consult/", "/api/patient-updates")):
+        required_role = "patient"
+    elif path == "/api/dashboard/stats":
+        required_role = "clinicadmin"
+    if required_role and principal.role != required_role:
+        return JSONResponse(status_code=403, content={"detail": "Insufficient role"})
+
+    # IDs in self-service URLs must match the signed-in identity. Staff tenant
+    # boundaries are enforced in PostgreSQL by the transaction RLS policies.
+    segments = path.strip("/").split("/")
+    if principal.role == "patient" and len(segments) >= 4 and segments[1] == "portal" and segments[2] == "patient":
+        if segments[3].isdigit() and int(segments[3]) != principal.patient_id:
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+    if principal.role == "patient" and len(segments) >= 3 and segments[1] == "patient" and segments[2].isdigit():
+        if int(segments[2]) != principal.patient_id:
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+    if principal.role == "doctor" and len(segments) >= 3 and segments[1] == "doctor":
+        if segments[2].isdigit() and int(segments[2]) != principal.doctor_id:
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+    request.state.principal = principal
+    context_token = set_principal(principal)
+    try:
+        response = await call_next(request)
+    finally:
+        reset_principal(context_token)
+    return response
 
 # ---- Email helper (Resend – free tier: 100 emails/day) ----
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")  # optional – emails silently skipped if unset
@@ -377,19 +433,11 @@ async def health_check():
 
 @app.get("/api/summaries")
 async def list_summaries():
-    """List all saved summaries."""
-    try:
-        summaries = []
-        for filepath in sorted(OUTPUTS_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
-            summaries.append({
-                "filename": filepath.name,
-                "path": str(filepath),
-                "created": datetime.fromtimestamp(filepath.stat().st_mtime).isoformat(),
-                "size": filepath.stat().st_size
-            })
-        return {"summaries": summaries, "count": len(summaries)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error listing summaries: {str(e)}")
+    """The old global filesystem listing has no tenant ownership metadata."""
+    raise HTTPException(
+        status_code=410,
+        detail="Global file summaries are disabled; use the authenticated patient history endpoint.",
+    )
 
 
 @app.post("/api/summarize")
@@ -864,35 +912,21 @@ async def get_patient(patient_id: int):
 
 
 @app.post("/api/patients")
-async def create_patient(request: CreatePatientRequest):
-    """Create a new patient with auto-generated login credentials."""
+async def create_patient(request: CreatePatientRequest, http_request: Request):
+    """Create a patient account linked to the signed-in admin's clinic."""
     try:
-        import hashlib, random as _rand
-
-        # Generate credentials from name
-        name_parts = request.name.strip().split()
-        first = name_parts[0].lower() if name_parts else "patient"
-        last = name_parts[-1].lower() if len(name_parts) > 1 else ""
-        username = f"{first}.{last}" if last else first
-        password = f"{first}123"
-
-        # Check if username exists, append number if so
-        with db.get_db() as conn:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute("SELECT id FROM patients WHERE username = %s", (username,))
-            if cursor.fetchone():
-                username = f"{username}{_rand.randint(1, 99)}"
-
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-
-        # Create patient with credentials
-        with db.get_db() as conn:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute("""
-                INSERT INTO patients (name, date_of_birth, email, username, password_hash)
-                VALUES (%s, %s, %s, %s, %s) RETURNING id
-            """, (request.name, request.date_of_birth, request.email, username, password_hash))
-            patient_id = cursor.fetchone()['id']
+        principal = getattr(http_request.state, "principal", None)
+        if not principal or principal.role != "clinicadmin":
+            raise HTTPException(status_code=403, detail="Clinic administrator access required")
+        import secrets
+        username = (request.email or f"patient-{secrets.token_hex(5)}").strip().lower()
+        if db.patient_username_exists(username):
+            username = f"{username}-{secrets.token_hex(3)}"
+        password = secrets.token_urlsafe(18)
+        patient_id = db.register_patient(
+            name=request.name, username=username, password=password,
+            date_of_birth=request.date_of_birth, email=request.email,
+        )
 
         # Send welcome email with credentials if email provided
         email_sent = False
@@ -905,6 +939,8 @@ async def create_patient(request: CreatePatientRequest):
             "credentials": {"username": username, "password": password},
             "email_sent": email_sent
         })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating patient: {str(e)}")
 
@@ -934,37 +970,15 @@ async def get_summary_detail(summary_id: int):
 
 
 @app.post("/api/save-summary")
-async def save_summary(request: SaveSummaryRequest):
+async def save_summary(request: SaveSummaryRequest, http_request: Request):
     """Save a summary to the database with all related data."""
     try:
-        # Find or create patient (auto-generate credentials for new patients)
-        patient = db.get_patient_by_name(request.patient_name)
-        credentials = None
-        if patient:
-            patient_id = patient["id"]
-        else:
-            import hashlib, random as _rand
-            name_parts = request.patient_name.strip().split()
-            first = name_parts[0].lower() if name_parts else "patient"
-            last = name_parts[-1].lower() if len(name_parts) > 1 else ""
-            username = f"{first}.{last}" if last else first
-            password = f"{first}123"
-
-            with db.get_db() as conn:
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cursor.execute("SELECT id FROM patients WHERE username = %s", (username,))
-                if cursor.fetchone():
-                    username = f"{username}{_rand.randint(1, 99)}"
-
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
-            with db.get_db() as conn:
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cursor.execute("""
-                    INSERT INTO patients (name, username, password_hash)
-                    VALUES (%s, %s, %s) RETURNING id
-                """, (request.patient_name, username, password_hash))
-                patient_id = cursor.fetchone()['id']
-            credentials = {"username": username, "password": password}
+        principal = getattr(http_request.state, "principal", None)
+        if not principal or principal.role != "patient" or not principal.patient_id:
+            raise HTTPException(status_code=403, detail="Patient sign-in required to save this record")
+        # Never identify or create an account from a document-provided name.
+        # The authenticated patient's server-side identity owns this record.
+        patient_id = principal.patient_id
 
         # Create summary
         summary_id = db.create_summary(
@@ -1022,10 +1036,9 @@ async def save_summary(request: SaveSummaryRequest):
             "patient_id": patient_id,
             "message": "Summary saved successfully"
         }
-        if credentials:
-            result["credentials"] = credentials
-
         return JSONResponse(content=result)
+    except HTTPException:
+        raise
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error saving summary: {str(e)}")
@@ -1036,12 +1049,15 @@ async def save_summary(request: SaveSummaryRequest):
 # =============================================================================
 
 @app.post("/api/chat/patient")
-async def patient_chat_endpoint(request: PatientChatRequest):
+async def patient_chat_endpoint(request: PatientChatRequest, http_request: Request):
     """
     Patient-specific chat - asks questions about a specific patient's summary.
     Used by the small chat button next to download in results view.
     """
     try:
+        principal = getattr(http_request.state, "principal", None)
+        if not principal or principal.role != "patient" or not principal.patient_id:
+            raise HTTPException(status_code=403, detail="Patient sign-in required")
         # Check for quick response first
         quick = check_quick_response(request.message)
         if quick:
@@ -1060,7 +1076,7 @@ async def patient_chat_endpoint(request: PatientChatRequest):
             medications=request.medications,
             test_results=request.test_results,
             interactions=request.interactions,
-            patient_id=request.patient_id
+            patient_id=principal.patient_id
         )
 
         return JSONResponse(content={
@@ -1069,12 +1085,14 @@ async def patient_chat_endpoint(request: PatientChatRequest):
             "timestamp": datetime.now().isoformat()
         })
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in patient chat: {str(e)}")
 
 
 @app.post("/api/chat/general")
-async def general_chat_endpoint(request: GeneralChatRequest):
+async def general_chat_endpoint(request: GeneralChatRequest, http_request: Request):
     """
     General chat - search across all patients, general health questions.
     Used by the dedicated chat view.
@@ -1092,7 +1110,8 @@ async def general_chat_endpoint(request: GeneralChatRequest):
         # Get AI response with database context
         response = await general_chat(
             message=request.message,
-            session_id=request.session_id
+            session_id=request.session_id,
+            patient_id=http_request.state.principal.patient_id
         )
 
         return JSONResponse(content={
@@ -1200,14 +1219,17 @@ async def get_consultation_summary(request: ConsultationSummaryRequest):
 
 
 @app.post("/api/consult/start")
-async def start_consultation(request: StartConsultationRequest = None):
+async def start_consultation(http_request: Request, request: StartConsultationRequest = None):
     """
     Start a new consultation session - generates a unique session ID.
     """
     import uuid
     session_id = f"consult_{uuid.uuid4().hex[:12]}"
 
-    patient_id = request.patient_id if request else None
+    principal = getattr(http_request.state, "principal", None)
+    if not principal or principal.role != "patient" or not principal.patient_id:
+        raise HTTPException(status_code=403, detail="Patient sign-in required")
+    patient_id = principal.patient_id
 
     # Create session in database with patient link
     db.create_consultation_session(session_id, patient_id=patient_id)
@@ -1297,13 +1319,15 @@ class ConsultationConfigUpdate(BaseModel):
 
 
 @app.get("/api/admin/consult/configs")
-async def list_consultation_configs():
+async def list_consultation_configs(request: Request):
     """
     List all consultation configurations.
     Admin endpoint to view all available consultation templates.
     """
     try:
-        configs = voice_service.list_configs()
+        principal = request.state.principal
+        configs = [config for config in voice_service.list_configs() if config.get("config_id") == "default"]
+        configs.extend(db.get_all_consultation_configs(clinic_id=principal.clinic_id))
         return JSONResponse(content={
             "success": True,
             "configs": configs,
@@ -1314,17 +1338,18 @@ async def list_consultation_configs():
 
 
 @app.get("/api/admin/consult/configs/{config_id}")
-async def get_consultation_config(config_id: str):
+async def get_consultation_config(config_id: str, request: Request):
     """
     Get a specific consultation configuration.
     """
     try:
-        config = voice_service.get_config(config_id)
-        if not config:
+        config = voice_service.get_config(config_id) if config_id == "default" else None
+        config_data = config.to_dict() if config else db.get_consultation_config(config_id)
+        if not config_data:
             raise HTTPException(status_code=404, detail="Configuration not found")
         return JSONResponse(content={
             "success": True,
-            "config": config.to_dict()
+            "config": config_data
         })
     except HTTPException:
         raise
@@ -1333,14 +1358,14 @@ async def get_consultation_config(config_id: str):
 
 
 @app.post("/api/admin/consult/configs")
-async def create_consultation_config(request: ConsultationConfigCreate):
+async def create_consultation_config(request: ConsultationConfigCreate, http_request: Request):
     """
     Create a new consultation configuration.
     Admin endpoint to create custom consultation templates.
     """
     try:
         # Check if config_id already exists
-        existing = voice_service.get_config(request.config_id)
+        existing = db.get_consultation_config(request.config_id)
         if existing:
             raise HTTPException(status_code=400, detail="Configuration ID already exists")
 
@@ -1357,13 +1382,12 @@ async def create_consultation_config(request: ConsultationConfigCreate):
             settings=request.settings or {}
         )
 
-        voice_service.create_config(config)
-
         # Also save to database for persistence
         db.create_consultation_config(
             config_id=request.config_id,
             name=request.name,
             fields=request.fields or DEFAULT_CONSULTATION_FIELDS,
+            clinic_id=http_request.state.principal.clinic_id,
             description=request.description,
             ai_prompt=request.ai_prompt,
             system_instruction=request.system_instruction,
@@ -1372,6 +1396,7 @@ async def create_consultation_config(request: ConsultationConfigCreate):
             emergency_message=request.emergency_message,
             settings=request.settings
         )
+        voice_service.create_config(config)
 
         return JSONResponse(content={
             "success": True,
@@ -1390,8 +1415,9 @@ async def update_consultation_config(config_id: str, request: ConsultationConfig
     Update an existing consultation configuration.
     """
     try:
+        stored_config = db.get_consultation_config(config_id)
         config = voice_service.get_config(config_id)
-        if not config:
+        if not stored_config or not config:
             raise HTTPException(status_code=404, detail="Configuration not found")
 
         # Build updates dict with only provided fields
@@ -1441,6 +1467,9 @@ async def delete_consultation_config(config_id: str):
         if config_id == "default":
             raise HTTPException(status_code=400, detail="Cannot delete the default configuration")
 
+        if not db.get_consultation_config(config_id):
+            raise HTTPException(status_code=404, detail="Configuration not found")
+
         deleted = voice_service.delete_config(config_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Configuration not found")
@@ -1481,13 +1510,28 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
     WebSocket endpoint for real-time voice consultation.
     Handles bidirectional audio streaming with Gemini Live API.
     """
+    principal = principal_for_request(websocket)
+    origin = websocket.headers.get("origin")
+    if principal is None or origin not in allowed_origins or principal.role != "patient":
+        await websocket.close(code=4401 if principal is None else 4403)
+        return
+
+    context_token = set_principal(principal)
+    authorized_session = db.get_consultation_session(session_id)
+    if not authorized_session:
+        reset_principal(context_token)
+        await websocket.close(code=4404)
+        return
+    if principal.role == "patient" and authorized_session.get("patient_id") != principal.patient_id:
+        reset_principal(context_token)
+        await websocket.close(code=4404)
+        return
     await websocket.accept()
 
     # Get or create session
     session = voice_service.get_session(session_id)
     if not session:
         session = voice_service.create_session(session_id)
-        db.create_consultation_session(session_id)
 
     async def on_audio(audio_bytes: bytes):
         """Send audio back to client as binary (matching voicegen pattern)"""
@@ -1613,6 +1657,7 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
             await audio_task
         except asyncio.CancelledError:
             pass
+        reset_principal(context_token)
 
 
 # =============================================================================
@@ -1789,12 +1834,16 @@ async def admin_login(request: AdminLoginRequest):
         user = db.verify_admin_login(request.username, request.password)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid credentials")
+        if not user.get("clinic_id"):
+            raise HTTPException(status_code=403, detail="Admin account is not assigned to a clinic")
 
-        return JSONResponse(content={
+        response = JSONResponse(content={
             "success": True,
             "user": user,
             "message": "Login successful"
         })
+        set_session_cookie(response, issue_session(user, "clinicadmin"))
+        return response
     except HTTPException:
         raise
     except Exception as e:
@@ -1818,11 +1867,15 @@ async def patient_login(request: PatientLoginRequest):
         if not user:
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
-        return JSONResponse(content={
+        if not user.get("clinic_ids"):
+            raise HTTPException(status_code=403, detail="Patient account is not linked to a clinic")
+        response = JSONResponse(content={
             "success": True,
             "user": user,
             "message": "Login successful"
         })
+        set_session_cookie(response, issue_session(user, "patient"))
+        return response
     except HTTPException:
         raise
     except Exception as e:
@@ -1845,9 +1898,12 @@ class ResetPasswordRequest(BaseModel):
 
 
 @app.post("/api/patient/change-password")
-async def change_password(request: ChangePasswordRequest):
+async def change_password(request: ChangePasswordRequest, http_request: Request):
     """Change a patient's password (requires current password)."""
     try:
+        principal = getattr(http_request.state, "principal", None)
+        if not principal or principal.role != "patient" or request.patient_id != principal.patient_id:
+            raise HTTPException(status_code=403, detail="Cannot change another account's password")
         if len(request.new_password) < 6:
             raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
 
@@ -1940,16 +1996,44 @@ async def doctor_login(request: DoctorLoginRequest):
         user = db.verify_doctor_login(request.username, request.password, request.clinic_id)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid username or password")
+        if not user.get("clinic_id"):
+            raise HTTPException(status_code=403, detail="Doctor account is not assigned to a clinic")
 
-        return JSONResponse(content={
+        response = JSONResponse(content={
             "success": True,
             "user": user,
             "message": "Login successful"
         })
+        set_session_cookie(response, issue_session(user, "doctor"))
+        return response
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    principal = request.state.principal
+    if principal.role == "patient":
+        user = db.get_patient(principal.patient_id)
+    elif principal.role == "doctor":
+        user = db.get_doctor(principal.doctor_id)
+    else:
+        user = db.get_admin_user(principal.user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="Session is no longer valid")
+    return {"role": principal.role, "user": user, "clinic_id": principal.clinic_id}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        revoke_session(token)
+    response = JSONResponse(content={"success": True})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
 
 
 class DoctorChangePasswordRequest(BaseModel):
@@ -1959,9 +2043,12 @@ class DoctorChangePasswordRequest(BaseModel):
 
 
 @app.post("/api/doctor/change-password")
-async def doctor_change_password(request: DoctorChangePasswordRequest):
+async def doctor_change_password(request: DoctorChangePasswordRequest, http_request: Request):
     """Change a doctor's password (requires current password)."""
     try:
+        principal = getattr(http_request.state, "principal", None)
+        if not principal or principal.role != "doctor" or request.doctor_id != principal.doctor_id:
+            raise HTTPException(status_code=403, detail="Cannot change another account's password")
         if len(request.new_password) < 6:
             raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
 
@@ -2060,13 +2147,7 @@ async def clinicadmin_register_patient(request: RegisterPatientRequest):
     """Register a new patient with login credentials (clinic admin only)."""
     try:
         # Check if username already taken
-        existing = None
-        with db.get_db() as conn:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute("SELECT id FROM patients WHERE username = %s", (request.username,))
-            existing = cursor.fetchone()
-
-        if existing:
+        if db.patient_username_exists(request.username):
             raise HTTPException(status_code=400, detail="Username already taken")
 
         patient_id = db.register_patient(
@@ -2946,15 +3027,18 @@ async def get_patient_updates_endpoint(patient_id: int, limit: int = 50):
 
 
 @app.post("/api/patient-updates/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(http_request: Request, file: UploadFile = File(...)):
     """Transcribe audio to text using Gemini and save the audio file."""
     try:
+        principal = getattr(http_request.state, "principal", None)
+        if not principal or principal.role != "patient" or not principal.patient_id:
+            raise HTTPException(status_code=403, detail="Patient sign-in required")
         file_content = await file.read()
         file_base64 = base64.b64encode(file_content).decode('utf-8')
 
         # Save audio file to disk
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        audio_filename = f"update_audio_{timestamp}.webm"
+        import secrets
+        audio_filename = f"patient_{principal.patient_id}_{secrets.token_urlsafe(18)}.webm"
         audio_dir = OUTPUTS_DIR / "audio"
         audio_dir.mkdir(exist_ok=True)
         audio_path = audio_dir / audio_filename
@@ -2969,6 +3053,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
             "text": response.text.strip(),
             "audio_url": f"/api/audio/{audio_filename}"
         })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error transcribing: {str(e)}")
 
@@ -2977,6 +3063,21 @@ async def transcribe_audio(file: UploadFile = File(...)):
 async def serve_audio(filename: str):
     """Serve a saved audio file."""
     from fastapi.responses import FileResponse
+    from tenant_context import current_principal
+    import re
+    principal = current_principal()
+    match = re.fullmatch(r"patient_(\d+)_([A-Za-z0-9_-]+)\.webm", filename)
+    if not principal or not match:
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    patient_id = int(match.group(1))
+    if principal.role == "patient":
+        allowed = principal.patient_id == patient_id
+    elif principal.role in ("doctor", "clinicadmin"):
+        allowed = db.get_patient(patient_id) is not None
+    else:
+        allowed = False
+    if not allowed:
+        raise HTTPException(status_code=404, detail="Audio file not found")
     audio_path = OUTPUTS_DIR / "audio" / filename
     if not audio_path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
@@ -3082,15 +3183,18 @@ async def get_patient_consultations_endpoint(patient_id: int):
 # =============================================================================
 
 @app.post("/api/patient/book-appointment")
-async def book_appointment(request: BookAppointmentRequest):
+async def book_appointment(request: BookAppointmentRequest, http_request: Request):
     """Book an appointment for a patient."""
     try:
+        principal = getattr(http_request.state, "principal", None)
+        if not principal or principal.role != "patient" or not principal.patient_id:
+            raise HTTPException(status_code=403, detail="Patient sign-in required")
         doctor = db.get_doctor(request.doctor_id)
         if not doctor:
             raise HTTPException(status_code=404, detail="Doctor not found")
 
         appointment_id = db.create_appointment(
-            patient_id=request.patient_id,
+            patient_id=principal.patient_id,
             doctor_id=request.doctor_id,
             clinic_id=doctor['clinic_id'],
             appointment_date=request.appointment_date,
@@ -3204,23 +3308,17 @@ async def doctor_update_appointment(doctor_id: int, appointment_id: int, request
 async def clinicadmin_register_patient_full(request: RegisterPatientFullRequest):
     """Register a new patient with full HIPAA-compliant details."""
     try:
-        # Generate credentials: username = firstname.lastname, password = firstname + "123"
+        import secrets
+        # Generate a unique account and high-entropy one-time credential.
         name_parts = request.name.strip().split()
         first = name_parts[0].lower() if name_parts else "patient"
         last = name_parts[-1].lower() if len(name_parts) > 1 else ""
         username = f"{first}.{last}" if last else first
-        password = f"{first}123"
+        password = secrets.token_urlsafe(18)
 
         # Check if username exists, append number if so
-        existing = None
-        with db.get_db() as conn:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute("SELECT id FROM patients WHERE username = %s", (username,))
-            existing = cursor.fetchone()
-
-        if existing:
-            import random
-            username = f"{username}{random.randint(1, 99)}"
+        if db.patient_username_exists(username):
+            username = f"{username}-{secrets.token_hex(3)}"
 
         patient_id = db.register_patient_full(
             name=request.name,
@@ -3265,7 +3363,13 @@ async def clinicadmin_register_patient_full(request: RegisterPatientFullRequest)
 async def clinicadmin_create_doctor(request: CreateDoctorRequest):
     """Create a new doctor with auto-generated login credentials."""
     try:
-        import hashlib, random
+        import secrets, random
+        from tenant_context import current_principal
+        principal = current_principal()
+        if not principal or principal.role != "clinicadmin" or not principal.clinic_id:
+            raise HTTPException(status_code=403, detail="Clinic administrator access required")
+        if request.clinic_id is not None and request.clinic_id != principal.clinic_id:
+            raise HTTPException(status_code=403, detail="Cannot create a doctor in another clinic")
 
         # Generate username (firstname.lastname)
         first = request.first_name.strip().lower()
@@ -3283,8 +3387,8 @@ async def clinicadmin_create_doctor(request: CreateDoctorRequest):
                     break
 
         # Generate password
-        password = f"{first}123"
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        password = secrets.token_urlsafe(18)
+        password_hash = db._hash_password(password)
 
         doctor_id = db.create_doctor(
             first_name=request.first_name,
@@ -3325,6 +3429,8 @@ async def clinicadmin_create_doctor(request: CreateDoctorRequest):
             },
             "email_sent": email_sent
         })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
