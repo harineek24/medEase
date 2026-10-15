@@ -2,6 +2,7 @@ import os
 import base64
 import json
 import asyncio
+import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -26,6 +27,7 @@ from chat_handler import patient_chat, general_chat, check_quick_response, docto
 from voice_service import voice_service, CONSULTATION_FIELDS, ConsultationConfig, DEFAULT_CONSULTATION_FIELDS, AVAILABLE_VOICES
 from security import SESSION_COOKIE, principal_for_request, issue_session, revoke_session, set_session_cookie
 from tenant_context import set_principal, reset_principal
+from credence_service import CredenceError, start_flow as start_credence_flow, poll_flow as poll_credence_flow
 
 # Initialize FastAPI app
 app = FastAPI(title="MedEase - EHR Summarizer API")
@@ -63,6 +65,7 @@ async def enforce_authenticated_api(request: Request, call_next):
 
     public_paths = {
         "/api/admin/login", "/api/patient/login", "/api/doctor/login",
+        "/api/auth/credence/start", "/api/auth/credence/poll",
         "/api/patient/forgot-password", "/api/patient/reset-password",
         "/api/doctor/forgot-password", "/api/doctor/reset-password",
         "/api/clinics", "/api/doctors", "/api/doctors/search",
@@ -1829,25 +1832,7 @@ class AdminLoginRequest(BaseModel):
 
 @app.post("/api/admin/login")
 async def admin_login(request: AdminLoginRequest):
-    """Admin login endpoint."""
-    try:
-        user = db.verify_admin_login(request.username, request.password)
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        if not user.get("clinic_id"):
-            raise HTTPException(status_code=403, detail="Admin account is not assigned to a clinic")
-
-        response = JSONResponse(content={
-            "success": True,
-            "user": user,
-            "message": "Login successful"
-        })
-        set_session_cookie(response, issue_session(user, "clinicadmin"))
-        return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=410, detail="Credence verification is required. Start sign-in through the Credence flow.")
 
 
 # =============================================================================
@@ -1861,25 +1846,7 @@ class PatientLoginRequest(BaseModel):
 
 @app.post("/api/patient/login")
 async def patient_login(request: PatientLoginRequest):
-    """Patient login endpoint."""
-    try:
-        user = db.verify_patient_login(request.username, request.password)
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid username or password")
-
-        if not user.get("clinic_ids"):
-            raise HTTPException(status_code=403, detail="Patient account is not linked to a clinic")
-        response = JSONResponse(content={
-            "success": True,
-            "user": user,
-            "message": "Login successful"
-        })
-        set_session_cookie(response, issue_session(user, "patient"))
-        return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=410, detail="Credence verification is required. Start sign-in through the Credence flow.")
 
 
 # --- Password Management ---
@@ -1991,25 +1958,73 @@ class DoctorLoginRequest(BaseModel):
 
 @app.post("/api/doctor/login")
 async def doctor_login(request: DoctorLoginRequest):
-    """Doctor login endpoint."""
+    raise HTTPException(status_code=410, detail="Credence verification is required. Start sign-in through the Credence flow.")
+
+
+class CredenceStartRequest(BaseModel):
+    role: str
+    username: str
+    password: str
+    clinic_id: Optional[int] = None
+
+
+class CredencePollRequest(BaseModel):
+    flow_token: str
+
+
+@app.post("/api/auth/credence/start")
+async def credence_login_start(request: CredenceStartRequest):
+    """Check the account password, then begin mandatory Credence ID verification."""
+    role = request.role
+    if role not in ("patient", "doctor", "clinicadmin"):
+        raise HTTPException(status_code=400, detail="Invalid account type")
     try:
-        user = db.verify_doctor_login(request.username, request.password, request.clinic_id)
+        if role == "patient":
+            user = db.verify_patient_login(request.username, request.password)
+            if user and not user.get("clinic_ids"):
+                raise HTTPException(status_code=403, detail="Patient account is not linked to a clinic")
+        elif role == "doctor":
+            user = db.verify_doctor_login(request.username, request.password, request.clinic_id)
+            if user and not user.get("clinic_id"):
+                raise HTTPException(status_code=403, detail="Doctor account is not assigned to a clinic")
+        else:
+            user = db.verify_admin_login(request.username, request.password)
+            if user and not user.get("clinic_id"):
+                raise HTTPException(status_code=403, detail="Admin account is not assigned to a clinic")
         if not user:
             raise HTTPException(status_code=401, detail="Invalid username or password")
-        if not user.get("clinic_id"):
-            raise HTTPException(status_code=403, detail="Doctor account is not assigned to a clinic")
-
-        response = JSONResponse(content={
-            "success": True,
-            "user": user,
-            "message": "Login successful"
-        })
-        set_session_cookie(response, issue_session(user, "doctor"))
-        return response
+        if not user.get("date_of_birth") or (role != "patient" and not (user.get("first_name") and user.get("last_name"))):
+            raise HTTPException(status_code=403, detail="Your clinic must complete your verified legal name and date of birth before Credence sign-in can be enabled.")
+        flow = start_credence_flow(role, user)
+        return {"success": True, **flow, "expires_in": 300}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except CredenceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail="Credence verification service is temporarily unavailable.") from exc
+
+
+@app.post("/api/auth/credence/poll")
+async def credence_login_poll(request: CredencePollRequest):
+    if len(request.flow_token) > 128:
+        raise HTTPException(status_code=400, detail="Invalid verification flow")
+    try:
+        result = poll_credence_flow(request.flow_token)
+        if result["status"] == "verified":
+            role, user = result["role"], result["user"]
+            if role == "clinicadmin" and not user.get("clinic_id"):
+                raise HTTPException(status_code=403, detail="Admin account is not assigned to a clinic")
+            response = JSONResponse(content={"success": True, "role": role, "user": user})
+            set_session_cookie(response, issue_session(user, role))
+            return response
+        return result
+    except HTTPException:
+        raise
+    except CredenceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail="Credence verification service is temporarily unavailable.") from exc
 
 
 @app.get("/api/auth/me")
@@ -2329,6 +2344,7 @@ class UpdateAppointmentRequest(BaseModel):
 class CreateDoctorRequest(BaseModel):
     first_name: str
     last_name: str
+    date_of_birth: Optional[str] = None
     clinic_id: Optional[int] = None
     title: str = "MD"
     specialty: Optional[str] = None
@@ -3393,6 +3409,7 @@ async def clinicadmin_create_doctor(request: CreateDoctorRequest):
         doctor_id = db.create_doctor(
             first_name=request.first_name,
             last_name=request.last_name,
+            date_of_birth=request.date_of_birth,
             clinic_id=request.clinic_id,
             title=request.title,
             specialty=request.specialty,

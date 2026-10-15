@@ -284,6 +284,7 @@ def _init_database_with_system_access():
                 clinic_id INTEGER,
                 first_name TEXT NOT NULL,
                 last_name TEXT NOT NULL,
+                date_of_birth TEXT,
                 username TEXT UNIQUE,
                 password_hash TEXT,
                 title TEXT DEFAULT 'MD',
@@ -351,6 +352,9 @@ def _init_database_with_system_access():
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 email TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                date_of_birth TEXT,
                 role TEXT DEFAULT 'staff',
                 clinic_id INTEGER,
                 is_active BOOLEAN DEFAULT TRUE,
@@ -359,6 +363,12 @@ def _init_database_with_system_access():
                 FOREIGN KEY (clinic_id) REFERENCES clinics(id)
             )
         """)
+
+        # Credence account matching requires independently verified legal name
+        # and date of birth. Existing accounts must have these populated.
+        for table, column in (("doctors", "date_of_birth"), ("admin_users", "first_name"),
+                              ("admin_users", "last_name"), ("admin_users", "date_of_birth")):
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} TEXT")
 
         # A patient is one MedEase identity and may be linked to several
         # clinics. Their clinical record is shared across those memberships.
@@ -821,6 +831,9 @@ def _ensure_bootstrap_admin(cursor):
     """Create the first admin only when an operator supplies deployment secrets."""
     username = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_USERNAME")
     password = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_PASSWORD")
+    first_name = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_FIRST_NAME")
+    last_name = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_LAST_NAME")
+    date_of_birth = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_DATE_OF_BIRTH")
     clinic_id = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_CLINIC_ID")
     clinic_name = os.getenv("MEDEASE_BOOTSTRAP_CLINIC_NAME")
     if not username or not password or len(password) < 14:
@@ -847,9 +860,9 @@ def _ensure_bootstrap_admin(cursor):
             clinic_id = cursor.fetchone()[0]
     password_hash = _hash_password(password)
     cursor.execute("""
-        INSERT INTO admin_users (username, password_hash, role, clinic_id)
-        VALUES (%s, %s, 'clinicadmin', %s)
-    """, (username, password_hash, int(clinic_id)))
+        INSERT INTO admin_users (username, password_hash, role, clinic_id, first_name, last_name, date_of_birth)
+        VALUES (%s, %s, 'clinicadmin', %s, %s, %s, %s)
+    """, (username, password_hash, int(clinic_id), first_name, last_name, date_of_birth))
 
 
 def _disable_known_demo_credentials(cursor):
@@ -2257,17 +2270,18 @@ def create_doctor(
     education: Optional[str] = None,
     certifications: Optional[str] = None,
     username: Optional[str] = None,
-    password_hash: Optional[str] = None
+    password_hash: Optional[str] = None,
+    date_of_birth: Optional[str] = None
 ) -> int:
     """Create a new doctor."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO doctors (clinic_id, first_name, last_name, username, password_hash, title, specialty, sub_specialty,
+            INSERT INTO doctors (clinic_id, first_name, last_name, date_of_birth, username, password_hash, title, specialty, sub_specialty,
                                npi_number, email, phone, bio, languages, education, certifications)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (clinic_id, first_name, last_name, username, password_hash, title, specialty, sub_specialty,
+        """, (clinic_id, first_name, last_name, date_of_birth, username, password_hash, title, specialty, sub_specialty,
               npi_number, email, phone, bio, languages, education, certifications))
         return cursor.fetchone()[0]
 
@@ -2350,7 +2364,7 @@ def verify_admin_login(username: str, password: str) -> Optional[Dict]:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT set_config('medease.auth_lookup', 'true', true), set_config('medease.login_name', %s, true)", (username,))
         cursor.execute("""
-            SELECT id, username, email, role, clinic_id, password_hash
+            SELECT id, username, email, role, clinic_id, first_name, last_name, date_of_birth, password_hash
             FROM admin_users
             WHERE username = %s AND is_active = TRUE
         """, (username,))
@@ -3758,7 +3772,7 @@ def verify_doctor_login(username: str, password: str, clinic_id: int = None) -> 
         cursor.execute("SELECT set_config('medease.auth_lookup', 'true', true), set_config('medease.login_name', %s, true)", (username,))
         if clinic_id:
             cursor.execute("""
-                SELECT d.id, d.first_name, d.last_name, d.username, d.email, d.specialty,
+                SELECT d.id, d.first_name, d.last_name, d.date_of_birth, d.username, d.email, d.specialty,
                        d.title, d.clinic_id, d.password_hash, c.name as clinic_name
                 FROM doctors d
                 LEFT JOIN clinics c ON d.clinic_id = c.id
@@ -3766,7 +3780,7 @@ def verify_doctor_login(username: str, password: str, clinic_id: int = None) -> 
             """, (username, clinic_id))
         else:
             cursor.execute("""
-                SELECT d.id, d.first_name, d.last_name, d.username, d.email, d.specialty,
+                SELECT d.id, d.first_name, d.last_name, d.date_of_birth, d.username, d.email, d.specialty,
                        d.title, d.clinic_id, d.password_hash, c.name as clinic_name
                 FROM doctors d
                 LEFT JOIN clinics c ON d.clinic_id = c.id
