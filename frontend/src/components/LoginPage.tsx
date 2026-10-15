@@ -14,6 +14,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { API_BASE_URL } from '@/api'
+import { QRCodeSVG } from 'qrcode.react'
 
 type RoleCard = 'clinicadmin' | 'doctor' | 'patient'
 
@@ -28,6 +29,8 @@ export default function LoginPage() {
   const { login, isAuthenticated, role } = useAuth()
 
   const [selectedRole, setSelectedRole] = useState<RoleCard | null>(null)
+  const [credenceFlow, setCredenceFlow] = useState<{ token: string; walletUri: string } | null>(null)
+  const [credenceStatus, setCredenceStatus] = useState('')
 
   // Forgot / Reset password state
   const [showForgotPassword, setShowForgotPassword] = useState(false)
@@ -100,6 +103,53 @@ export default function LoginPage() {
     }
   }, [selectedRole])
 
+  useEffect(() => {
+    if (!credenceFlow) return
+    let active = true
+    let busy = false
+    const poll = async () => {
+      if (busy || !active) return
+      busy = true
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/credence/poll`, {
+          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ flow_token: credenceFlow.token }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!active) return
+        if (!response.ok) throw new Error(data.detail || 'Credence verification failed')
+        if (data.success && data.role && data.user) {
+          const user = data.user
+          login({ role: data.role, user, clinicId: user.clinic_id, doctorId: data.role === 'doctor' ? user.id : undefined, patientId: data.role === 'patient' ? user.id : undefined })
+          navigate(data.role === 'clinicadmin' ? '/clinicadmin' : `/${data.role}`)
+          setCredenceFlow(null)
+        } else if (data.status === 'failed' || data.status === 'expired') {
+          setCredenceStatus(data.detail || 'Verification expired. Please sign in again.')
+          setCredenceFlow(null)
+        }
+      } catch (error) {
+        if (active) {
+          setCredenceStatus(error instanceof Error ? error.message : 'Credence verification failed')
+          setCredenceFlow(null)
+        }
+      } finally { busy = false }
+    }
+    void poll()
+    const timer = window.setInterval(() => { void poll() }, 2000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [credenceFlow, login, navigate])
+
+  const startCredenceLogin = async (role: RoleCard, username: string, password: string, clinicId?: number | null) => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/credence/start`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, username, password, clinic_id: clinicId || undefined }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.detail || 'Unable to start Credence verification')
+    setCredenceFlow({ token: data.flow_token, walletUri: data.wallet_uri })
+    setCredenceStatus('Scan this code with your supported mobile ID wallet. Waiting for verification…')
+  }
+
   // Admin login handler
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -107,24 +157,8 @@ export default function LoginPage() {
     setAdminLoading(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: adminUsername, password: adminPassword }),
-      })
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}))
-        throw new Error(err.detail || 'Invalid credentials')
-      }
-
-      const data = await response.json()
-      login({
-        role: 'clinicadmin',
-        user: data.user || { username: adminUsername },
-        clinicId: data.clinic_id || 1,
-      })
-      navigate('/clinicadmin')
+      await startCredenceLogin('clinicadmin', adminUsername, adminPassword)
+      setAdminPassword('')
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Login failed')
     } finally {
@@ -139,28 +173,8 @@ export default function LoginPage() {
     setDoctorLoading(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/doctor/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: doctorUsername,
-          password: doctorPassword,
-          clinic_id: selectedClinicId || undefined,
-        }),
-      })
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}))
-        throw new Error(err.detail || 'Invalid username or password')
-      }
-
-      const data = await response.json()
-      login({
-        role: 'doctor',
-        user: data.user,
-        doctorId: data.user.id,
-      })
-      navigate('/doctor')
+      await startCredenceLogin('doctor', doctorUsername, doctorPassword, selectedClinicId)
+      setDoctorPassword('')
     } catch (err) {
       setDoctorError(err instanceof Error ? err.message : 'Login failed')
     } finally {
@@ -231,24 +245,8 @@ export default function LoginPage() {
     setPatientLoading(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/patient/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: patientUsername, password: patientPassword }),
-      })
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}))
-        throw new Error(err.detail || 'Invalid username or password')
-      }
-
-      const data = await response.json()
-      login({
-        role: 'patient',
-        user: data.user,
-        patientId: data.user.id,
-      })
-      navigate('/patient')
+      await startCredenceLogin('patient', patientUsername, patientPassword)
+      setPatientPassword('')
     } catch (err) {
       setPatientError(err instanceof Error ? err.message : 'Login failed')
     } finally {
@@ -518,9 +516,6 @@ export default function LoginPage() {
                   {adminLoading ? 'Signing in...' : 'Sign In'}
                 </button>
               </form>
-              <p className="text-xs text-gray-400 mt-3 text-center">
-                Default: admin / admin123
-              </p>
             </div>
           )}
 
@@ -617,9 +612,6 @@ export default function LoginPage() {
               </button>
               <p className="text-xs text-gray-400 mt-2 text-center">
                 Your clinic admin will provide your login credentials.
-              </p>
-              <p className="text-xs text-gray-400 mt-1 text-center">
-                Demo: Clinic "Sunrise Community Health Center" · sarah.chen / sarah123
               </p>
             </div>
           )}
@@ -770,6 +762,16 @@ export default function LoginPage() {
                 Back to login
               </button>
             </div>
+          )}
+          {credenceFlow && (
+            <section className="mt-4 bg-white rounded-2xl border border-gray-100 shadow-sm p-6 text-center" aria-live="polite">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Verify with your mobile ID</h3>
+              <p className="text-sm text-gray-600 mb-4">Scan with a supported mobile ID wallet to verify your identity. The linked patient record remains shared across clinics.</p>
+              <div className="inline-block rounded-xl border p-3 bg-white"><QRCodeSVG value={credenceFlow.walletUri} size={220} level="M" /></div>
+              <a className="block mt-3 text-sm text-[#168096] underline" href={credenceFlow.walletUri}>Open wallet on this device</a>
+              <p className="mt-3 text-sm text-gray-600">{credenceStatus}</p>
+              <button type="button" onClick={() => { setCredenceFlow(null); setCredenceStatus('') }} className="mt-3 text-sm text-gray-500 hover:text-gray-800">Cancel verification</button>
+            </section>
           )}
         </div>
         </>

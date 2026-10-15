@@ -4,12 +4,43 @@ PostgreSQL database with psycopg2 for storing patient records, summaries, and ch
 """
 import os
 import json
+import hashlib
+import hmac
+import secrets
+import base64
 import psycopg2
 import psycopg2.extras
 from datetime import datetime, date
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=64)
+    return "scrypt${}${}${}${}${}".format(
+        2**14, 8, 1, base64.urlsafe_b64encode(salt).decode(),
+        base64.urlsafe_b64encode(digest).decode(),
+    )
+
+
+def _verify_password(stored_hash: str, password: str) -> tuple[bool, bool]:
+    """Return (valid, legacy_sha256); legacy hashes are upgraded after login."""
+    if not stored_hash:
+        return False, False
+    if stored_hash.startswith("scrypt$"):
+        try:
+            _, n, r, p, salt_text, digest_text = stored_hash.split("$", 5)
+            salt = base64.urlsafe_b64decode(salt_text.encode())
+            expected = base64.urlsafe_b64decode(digest_text.encode())
+            actual = hashlib.scrypt(password.encode(), salt=salt, n=int(n), r=int(r), p=int(p), dklen=len(expected))
+            return hmac.compare_digest(actual, expected), False
+        except (ValueError, TypeError):
+            return False, False
+    legacy = hashlib.sha256(password.encode()).hexdigest()
+    return hmac.compare_digest(stored_hash, legacy), True
 
 # Neon / PostgreSQL connection string from environment
 DATABASE_URL = os.environ.get(
@@ -47,6 +78,20 @@ def get_db():
     """Context manager for database connections."""
     conn = get_connection()
     try:
+        # PostgreSQL RLS policies consume identity from transaction-local
+        # settings.  Never accept tenant/user context from request parameters.
+        from tenant_context import current_principal
+        principal = current_principal()
+        if principal:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT set_config('medease.user_id', %s, true), "
+                "set_config('medease.role', %s, true), "
+                "set_config('medease.clinic_id', %s, true)",
+                (str(principal.user_id), principal.role,
+                 str(principal.clinic_id or "")),
+            )
+            cursor.close()
         yield conn
         conn.commit()
     except Exception as e:
@@ -58,6 +103,18 @@ def get_db():
 
 def init_database():
     """Initialize the database with all required tables."""
+    # Migrations and seeds must continue to work after RLS has been installed.
+    # This principal is set only inside this startup function, never per request.
+    from tenant_context import Principal, set_principal, reset_principal
+    system_token = set_principal(Principal(user_id=0, role="system"))
+    try:
+        _init_database_with_system_access()
+    finally:
+        reset_principal(system_token)
+
+
+def _init_database_with_system_access():
+    """Initialize schemas and run trusted startup migrations under the system principal."""
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -227,6 +284,7 @@ def init_database():
                 clinic_id INTEGER,
                 first_name TEXT NOT NULL,
                 last_name TEXT NOT NULL,
+                date_of_birth TEXT,
                 username TEXT UNIQUE,
                 password_hash TEXT,
                 title TEXT DEFAULT 'MD',
@@ -294,12 +352,49 @@ def init_database():
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 email TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                date_of_birth TEXT,
                 role TEXT DEFAULT 'staff',
                 clinic_id INTEGER,
                 is_active BOOLEAN DEFAULT TRUE,
                 last_login TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (clinic_id) REFERENCES clinics(id)
+            )
+        """)
+
+        # Credence account matching requires independently verified legal name
+        # and date of birth. Existing accounts must have these populated.
+        for table, column in (("doctors", "date_of_birth"), ("admin_users", "first_name"),
+                              ("admin_users", "last_name"), ("admin_users", "date_of_birth")):
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} TEXT")
+
+        # A patient is one MedEase identity and may be linked to several
+        # clinics. Their clinical record is shared across those memberships.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS patient_clinics (
+                patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+                clinic_id INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (patient_id, clinic_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                role TEXT NOT NULL CHECK (role IN ('patient', 'doctor', 'clinicadmin')),
+                clinic_id INTEGER REFERENCES clinics(id),
+                patient_id INTEGER REFERENCES patients(id) ON DELETE CASCADE,
+                doctor_id INTEGER REFERENCES doctors(id) ON DELETE CASCADE,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                revoked_at TIMESTAMPTZ,
+                CHECK ((role = 'patient' AND patient_id IS NOT NULL) OR
+                       (role = 'doctor' AND doctor_id IS NOT NULL) OR
+                       (role = 'clinicadmin' AND clinic_id IS NOT NULL))
             )
         """)
 
@@ -618,9 +713,88 @@ def init_database():
 
         # Seed sample data if tables are empty
         _seed_sample_data(cursor)
+        _disable_known_demo_credentials(cursor)
+
+        # Link existing patients only where the relationship is supported by
+        # existing clinic appointments or doctor-authored records. Orphans
+        # remain unlinked and cannot be exposed to a clinic until reviewed.
+        _migrate_patient_clinic_memberships(cursor)
 
         # Ensure doctor availability/extras are always populated
-        _ensure_doctor_extras(cursor)
+        if os.getenv("MEDEASE_SEED_DEMO_DATA", "false").lower() == "true":
+            _ensure_doctor_extras(cursor)
+        _ensure_bootstrap_admin(cursor)
+        # Install the database-enforced tenant boundary after tables and the
+        # conservative legacy membership backfill are in place.
+        rls_sql = (Path(__file__).with_name("tenant_rls.sql")).read_text(encoding="utf-8")
+        cursor.execute(rls_sql)
+
+
+def _migrate_patient_clinic_memberships(cursor):
+    cursor.execute("""
+        INSERT INTO patient_clinics (patient_id, clinic_id)
+        SELECT DISTINCT a.patient_id, a.clinic_id
+        FROM appointments a
+        JOIN patients p ON p.id = a.patient_id
+        JOIN clinics c ON c.id = a.clinic_id AND c.is_active = TRUE
+        WHERE a.patient_id IS NOT NULL AND a.clinic_id IS NOT NULL
+        ON CONFLICT (patient_id, clinic_id) DO NOTHING
+    """)
+    cursor.execute("""
+        INSERT INTO patient_clinics (patient_id, clinic_id)
+        SELECT DISTINCT dn.patient_id, d.clinic_id
+        FROM doctor_notes dn
+        JOIN doctors d ON d.id = dn.doctor_id
+        JOIN patients p ON p.id = dn.patient_id
+        JOIN clinics c ON c.id = d.clinic_id AND c.is_active = TRUE
+        WHERE d.clinic_id IS NOT NULL
+        ON CONFLICT (patient_id, clinic_id) DO NOTHING
+    """)
+
+
+def create_auth_session(token_hash: str, user_id: int, role: str,
+                        clinic_id: Optional[int], patient_id: Optional[int],
+                        doctor_id: Optional[int], expires_at: datetime) -> None:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO auth_sessions
+                (token_hash, user_id, role, clinic_id, patient_id, doctor_id, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (token_hash, user_id, role, clinic_id, patient_id, doctor_id, expires_at))
+
+
+def get_auth_session(token_hash: str) -> Optional[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            SELECT s.user_id, s.role, s.clinic_id, s.patient_id, s.doctor_id
+            FROM auth_sessions s
+            WHERE s.token_hash = %s AND s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
+        """, (token_hash,))
+        row = cursor.fetchone()
+        return _serialize_row(row) if row else None
+
+
+def revoke_auth_session(token_hash: str) -> None:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = %s", (token_hash,))
+
+
+def get_patient_clinic_ids(patient_id: int) -> List[int]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT clinic_id FROM patient_clinics WHERE patient_id = %s AND is_active = TRUE ORDER BY clinic_id", (patient_id,))
+        return [row[0] for row in cursor.fetchall()]
+
+
+def patient_username_exists(username: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT set_config('medease.auth_lookup', 'true', true), set_config('medease.login_name', %s, true)", (username,))
+        cursor.execute("SELECT 1 FROM patients WHERE username = %s LIMIT 1", (username,))
+        return cursor.fetchone() is not None
 
 
 def _migrate_doctors_table(cursor):
@@ -639,19 +813,73 @@ def _migrate_doctors_table(cursor):
     for col_name, col_type in new_columns:
         cursor.execute(f"ALTER TABLE doctors ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
 
-    # Backfill username and password_hash for existing doctors that have none
-    import hashlib
+    # Backfill usernames only. Never create predictable passwords for seeded
+    # staff accounts; credentials must be provisioned out of band.
     cursor.execute("SELECT id, first_name, last_name FROM doctors WHERE username IS NULL")
     rows = cursor.fetchall()
     for row in rows:
         first = row['first_name'].lower()
         last = row['last_name'].lower()
         username = f"{first}.{last}"
-        pw_hash = hashlib.sha256(f"{first}123".encode()).hexdigest()
         cursor.execute(
-            "UPDATE doctors SET username = %s, password_hash = %s WHERE id = %s",
-            (username, pw_hash, row['id'])
+            "UPDATE doctors SET username = %s WHERE id = %s",
+            (username, row['id'])
         )
+
+
+def _ensure_bootstrap_admin(cursor):
+    """Create the first admin only when an operator supplies deployment secrets."""
+    username = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_USERNAME")
+    password = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_PASSWORD")
+    first_name = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_FIRST_NAME")
+    last_name = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_LAST_NAME")
+    date_of_birth = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_DATE_OF_BIRTH")
+    clinic_id = os.getenv("MEDEASE_BOOTSTRAP_ADMIN_CLINIC_ID")
+    clinic_name = os.getenv("MEDEASE_BOOTSTRAP_CLINIC_NAME")
+    if not username or not password or len(password) < 14:
+        return
+    cursor.execute("SELECT 1 FROM admin_users LIMIT 1")
+    if cursor.fetchone():
+        return
+    if clinic_id:
+        cursor.execute("SELECT 1 FROM clinics WHERE id = %s", (int(clinic_id),))
+        if not cursor.fetchone():
+            raise ValueError("MEDEASE_BOOTSTRAP_ADMIN_CLINIC_ID does not match a clinic")
+    else:
+        if not clinic_name:
+            return
+        cursor.execute("SELECT id FROM clinics WHERE lower(name) = lower(%s) LIMIT 1", (clinic_name.strip(),))
+        existing_clinic = cursor.fetchone()
+        if existing_clinic:
+            clinic_id = existing_clinic['id']
+        else:
+            cursor.execute("SELECT 1 FROM clinics LIMIT 1")
+            if cursor.fetchone():
+                raise ValueError("Specify an existing clinic ID or matching MEDEASE_BOOTSTRAP_CLINIC_NAME")
+            cursor.execute("INSERT INTO clinics (name) VALUES (%s) RETURNING id", (clinic_name.strip(),))
+            clinic_id = cursor.fetchone()[0]
+    password_hash = _hash_password(password)
+    cursor.execute("""
+        INSERT INTO admin_users (username, password_hash, role, clinic_id, first_name, last_name, date_of_birth)
+        VALUES (%s, %s, 'clinicadmin', %s, %s, %s, %s)
+    """, (username, password_hash, int(clinic_id), first_name, last_name, date_of_birth))
+
+
+def _disable_known_demo_credentials(cursor):
+    """Remove legacy public demo passwords from databases created by older builds."""
+    cursor.execute(
+        "DELETE FROM admin_users WHERE lower(username) = 'admin' AND password_hash = %s",
+        (hashlib.sha256(b"admin123").hexdigest(),),
+    )
+    cursor.execute(
+        "UPDATE patients SET password_hash = NULL WHERE lower(username) IN ('maria', 'maria.garcia') AND password_hash = %s",
+        (hashlib.sha256(b"patient123").hexdigest(),),
+    )
+    cursor.execute("SELECT id, first_name, password_hash FROM doctors WHERE password_hash IS NOT NULL")
+    for row in cursor.fetchall():
+        known_demo_hash = hashlib.sha256(f"{row['first_name'].lower()}123".encode()).hexdigest()
+        if hmac.compare_digest(row['password_hash'], known_demo_hash):
+            cursor.execute("UPDATE doctors SET password_hash = NULL WHERE id = %s", (row['id'],))
 
 
 def _ensure_doctor_extras(cursor):
@@ -681,7 +909,9 @@ def _ensure_doctor_extras(cursor):
 
 
 def _seed_sample_data(cursor):
-    """Seed the database with sample clinic and doctor data."""
+    """Seed fictional data only when explicitly enabled for development."""
+    if os.getenv("MEDEASE_SEED_DEMO_DATA", "false").lower() != "true":
+        return
     cursor.execute("SELECT COUNT(*) as count FROM clinics")
     if cursor.fetchone()['count'] > 0:
         return
@@ -772,12 +1002,11 @@ def _seed_sample_data(cursor):
 
     for doc in doctors:
         doc_username = f"{doc['first_name'].lower()}.{doc['last_name'].lower()}"
-        doc_pw_hash = hashlib.sha256(f"{doc['first_name'].lower()}123".encode()).hexdigest()
         cursor.execute("""
-            INSERT INTO doctors (clinic_id, first_name, last_name, username, password_hash, title, specialty, sub_specialty,
+            INSERT INTO doctors (clinic_id, first_name, last_name, username, title, specialty, sub_specialty,
                                npi_number, email, bio, languages, education, certifications)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (doc["clinic_id"], doc["first_name"], doc["last_name"], doc_username, doc_pw_hash, doc["title"],
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (doc["clinic_id"], doc["first_name"], doc["last_name"], doc_username, doc["title"],
               doc["specialty"], doc["sub_specialty"], doc["npi_number"], doc["email"],
               doc["bio"], doc["languages"], doc["education"], doc["certifications"]))
 
@@ -831,18 +1060,9 @@ def _seed_sample_data(cursor):
             VALUES (%s, %s, %s, %s, %s)
         """, (svc["clinic_id"], svc["service_name"], svc["category"], svc["duration_minutes"], svc["price"]))
 
-    import hashlib
-    password_hash = hashlib.sha256("admin123".encode()).hexdigest()
-    cursor.execute("""
-        INSERT INTO admin_users (username, password_hash, email, role)
-        VALUES (%s, %s, %s, %s)
-    """, ("admin", password_hash, "admin@medease.com", "superadmin"))
-
-    import hashlib as _hl
-    default_pw = _hl.sha256("patient123".encode()).hexdigest()
     cursor.execute(
-        "INSERT INTO patients (name, date_of_birth, username, password_hash, email) VALUES (%s, %s, %s, %s, %s)",
-        ("Maria Garcia", "1985-03-14", "maria", default_pw, "maria.garcia@email.com")
+        "INSERT INTO patients (name, date_of_birth) VALUES (%s, %s)",
+        ("Maria Garcia", "1985-03-14")
     )
 
     other_patients = [
@@ -2050,17 +2270,18 @@ def create_doctor(
     education: Optional[str] = None,
     certifications: Optional[str] = None,
     username: Optional[str] = None,
-    password_hash: Optional[str] = None
+    password_hash: Optional[str] = None,
+    date_of_birth: Optional[str] = None
 ) -> int:
     """Create a new doctor."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO doctors (clinic_id, first_name, last_name, username, password_hash, title, specialty, sub_specialty,
+            INSERT INTO doctors (clinic_id, first_name, last_name, date_of_birth, username, password_hash, title, specialty, sub_specialty,
                                npi_number, email, phone, bio, languages, education, certifications)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (clinic_id, first_name, last_name, username, password_hash, title, specialty, sub_specialty,
+        """, (clinic_id, first_name, last_name, date_of_birth, username, password_hash, title, specialty, sub_specialty,
               npi_number, email, phone, bio, languages, education, certifications))
         return cursor.fetchone()[0]
 
@@ -2139,50 +2360,59 @@ def create_clinic_service(
 
 def verify_admin_login(username: str, password: str) -> Optional[Dict]:
     """Verify admin login credentials."""
-    import hashlib
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT set_config('medease.auth_lookup', 'true', true), set_config('medease.login_name', %s, true)", (username,))
         cursor.execute("""
-            SELECT id, username, email, role, clinic_id
+            SELECT id, username, email, role, clinic_id, first_name, last_name, date_of_birth, password_hash
             FROM admin_users
-            WHERE username = %s AND password_hash = %s AND is_active = TRUE
-        """, (username, password_hash))
+            WHERE username = %s AND is_active = TRUE
+        """, (username,))
         user = cursor.fetchone()
 
-        if user:
+        valid, legacy = _verify_password(user['password_hash'], password) if user else (False, False)
+        if user and valid:
+            if legacy:
+                cursor.execute("UPDATE admin_users SET password_hash = %s WHERE id = %s", (_hash_password(password), user['id']))
             # Update last login
             cursor.execute(
                 "UPDATE admin_users SET last_login = CURRENT_TIMESTAMP WHERE id = %s",
                 (user['id'],)
             )
+            user.pop('password_hash', None)
             return _serialize_row(user)
         return None
 
 
 def verify_patient_login(username: str, password: str) -> Optional[Dict]:
     """Verify patient login credentials."""
-    import hashlib
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT set_config('medease.auth_lookup', 'true', true), set_config('medease.login_name', %s, true)", (username,))
         cursor.execute("""
-            SELECT id, name, username, email, date_of_birth
+            SELECT id, name, username, email, date_of_birth, password_hash
             FROM patients
-            WHERE username = %s AND password_hash = %s AND is_active = TRUE
-        """, (username, password_hash))
+            WHERE username = %s AND is_active = TRUE
+        """, (username,))
         user = cursor.fetchone()
-        return _serialize_row(user) if user else None
+        valid, legacy = _verify_password(user['password_hash'], password) if user else (False, False)
+        if not user or not valid:
+            return None
+        if legacy:
+            cursor.execute("UPDATE patients SET password_hash = %s WHERE id = %s", (_hash_password(password), user['id']))
+        cursor.execute("SELECT set_config('medease.login_patient_id', %s, true)", (str(user['id']),))
+        cursor.execute("SELECT clinic_id FROM patient_clinics WHERE patient_id = %s AND is_active = TRUE ORDER BY clinic_id", (user['id'],))
+        result = _serialize_row(user)
+        result.pop('password_hash', None)
+        result['clinic_ids'] = [row['clinic_id'] for row in cursor.fetchall()]
+        return result
 
 
 def register_patient(name: str, username: str, password: str,
                      date_of_birth: str = None, email: str = None,
                      phone: str = None, address: str = None) -> int:
     """Register a new patient with login credentials (called by clinic admin)."""
-    import hashlib
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    password_hash = _hash_password(password)
 
     with get_db() as conn:
         cursor = conn.cursor()
@@ -2191,7 +2421,13 @@ def register_patient(name: str, username: str, password: str,
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (name, username, password_hash, date_of_birth, email, phone, address))
-        return cursor.fetchone()[0]
+        patient_id = cursor.fetchone()[0]
+        from tenant_context import current_principal
+        principal = current_principal()
+        if not principal or principal.role != "clinicadmin" or not principal.clinic_id:
+            raise PermissionError("A clinic administrator session is required to register a patient")
+        cursor.execute("INSERT INTO patient_clinics (patient_id, clinic_id) VALUES (%s, %s)", (patient_id, principal.clinic_id))
+        return patient_id
 
 
 def get_admin_user(user_id: int) -> Optional[Dict]:
@@ -3033,6 +3269,20 @@ def create_appointment(patient_id: int, doctor_id: int, clinic_id: int,
                        notes: str = None, reason: str = None) -> int:
     with get_db() as conn:
         cursor = conn.cursor()
+        from tenant_context import current_principal
+        principal = current_principal()
+        if principal and principal.role == "patient":
+            if patient_id != principal.patient_id:
+                raise PermissionError("Patients can book only for their own account")
+            # Booking with a clinic is the patient's explicit link to that
+            # clinic. It makes the shared patient record available to both
+            # linked clinic teams under the patient_clinics RLS policy.
+            cursor.execute("""
+                INSERT INTO patient_clinics (patient_id, clinic_id, is_active)
+                VALUES (%s, %s, TRUE)
+                ON CONFLICT (patient_id, clinic_id)
+                DO UPDATE SET is_active = TRUE
+            """, (patient_id, clinic_id))
         cursor.execute("""
             INSERT INTO appointments (patient_id, doctor_id, clinic_id, service_id,
                                      appointment_date, appointment_time, duration_minutes, notes)
@@ -3394,8 +3644,7 @@ def register_patient_full(name: str, username: str, password: str,
                           policy_number: str = None,
                           group_number: str = None) -> int:
     """Register a patient with full details including insurance."""
-    import hashlib
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    password_hash = _hash_password(password)
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -3404,6 +3653,12 @@ def register_patient_full(name: str, username: str, password: str,
             RETURNING id
         """, (name, username, password_hash, date_of_birth, email, phone, address, emergency_contact))
         patient_id = cursor.fetchone()[0]
+
+        from tenant_context import current_principal
+        principal = current_principal()
+        if not principal or principal.role != "clinicadmin" or not principal.clinic_id:
+            raise PermissionError("A clinic administrator session is required to register a patient")
+        cursor.execute("INSERT INTO patient_clinics (patient_id, clinic_id) VALUES (%s, %s)", (patient_id, principal.clinic_id))
 
         # Add insurance if provided
         if insurance_provider:
@@ -3421,17 +3676,16 @@ def register_patient_full(name: str, username: str, password: str,
 
 def change_patient_password(patient_id: int, old_password: str, new_password: str) -> bool:
     """Change a patient's password. Returns True if successful."""
-    import hashlib
-    old_hash = hashlib.sha256(old_password.encode()).hexdigest()
-    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+    new_hash = _hash_password(new_password)
 
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            "SELECT id FROM patients WHERE id = %s AND password_hash = %s",
-            (patient_id, old_hash)
+            "SELECT id, password_hash FROM patients WHERE id = %s",
+            (patient_id,)
         )
-        if not cursor.fetchone():
+        row = cursor.fetchone()
+        if not row or not _verify_password(row['password_hash'], old_password)[0]:
             return False
         cursor.execute(
             "UPDATE patients SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
@@ -3445,6 +3699,7 @@ def create_password_reset_token(email: str) -> Optional[str]:
     import secrets
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT set_config('medease.auth_lookup', 'true', true), set_config('medease.login_name', %s, true)", (email,))
         cursor.execute("SELECT id FROM patients WHERE LOWER(email) = LOWER(%s) AND is_active = TRUE", (email,))
         patient = cursor.fetchone()
         if not patient:
@@ -3472,8 +3727,7 @@ def create_password_reset_token(email: str) -> Optional[str]:
 
 def reset_password_with_token(token: str, new_password: str) -> bool:
     """Reset a patient's password using a valid token. Returns True if successful."""
-    import hashlib
-    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+    new_hash = _hash_password(new_password)
 
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -3484,6 +3738,8 @@ def reset_password_with_token(token: str, new_password: str) -> bool:
         row = cursor.fetchone()
         if not row:
             return False
+
+        cursor.execute("SELECT set_config('medease.role', 'password_reset', true), set_config('medease.user_id', %s, true)", (str(row['patient_id']),))
 
         cursor.execute(
             "UPDATE patients SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
@@ -3511,30 +3767,32 @@ def get_patient_email(patient_id: int) -> Optional[str]:
 
 def verify_doctor_login(username: str, password: str, clinic_id: int = None) -> Optional[Dict]:
     """Verify doctor login credentials. Optionally filter by clinic_id."""
-    import hashlib
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT set_config('medease.auth_lookup', 'true', true), set_config('medease.login_name', %s, true)", (username,))
         if clinic_id:
             cursor.execute("""
-                SELECT d.id, d.first_name, d.last_name, d.username, d.email, d.specialty,
-                       d.title, d.clinic_id, c.name as clinic_name
+                SELECT d.id, d.first_name, d.last_name, d.date_of_birth, d.username, d.email, d.specialty,
+                       d.title, d.clinic_id, d.password_hash, c.name as clinic_name
                 FROM doctors d
                 LEFT JOIN clinics c ON d.clinic_id = c.id
-                WHERE d.username = %s AND d.password_hash = %s AND d.is_active = TRUE AND d.clinic_id = %s
-            """, (username, password_hash, clinic_id))
+                WHERE d.username = %s AND d.is_active = TRUE AND d.clinic_id = %s
+            """, (username, clinic_id))
         else:
             cursor.execute("""
-                SELECT d.id, d.first_name, d.last_name, d.username, d.email, d.specialty,
-                       d.title, d.clinic_id, c.name as clinic_name
+                SELECT d.id, d.first_name, d.last_name, d.date_of_birth, d.username, d.email, d.specialty,
+                       d.title, d.clinic_id, d.password_hash, c.name as clinic_name
                 FROM doctors d
                 LEFT JOIN clinics c ON d.clinic_id = c.id
-                WHERE d.username = %s AND d.password_hash = %s AND d.is_active = TRUE
-            """, (username, password_hash))
+                WHERE d.username = %s AND d.is_active = TRUE
+            """, (username,))
         user = cursor.fetchone()
-        if user:
+        valid, legacy = _verify_password(user['password_hash'], password) if user else (False, False)
+        if user and valid:
+            if legacy:
+                cursor.execute("UPDATE doctors SET password_hash = %s WHERE id = %s", (_hash_password(password), user['id']))
             result = _serialize_row(user)
+            result.pop('password_hash', None)
             result['name'] = f"{user['first_name']} {user['last_name']}"
             return result
         return None
@@ -3542,17 +3800,16 @@ def verify_doctor_login(username: str, password: str, clinic_id: int = None) -> 
 
 def change_doctor_password(doctor_id: int, old_password: str, new_password: str) -> bool:
     """Change a doctor's password. Returns True if successful."""
-    import hashlib
-    old_hash = hashlib.sha256(old_password.encode()).hexdigest()
-    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+    new_hash = _hash_password(new_password)
 
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            "SELECT id FROM doctors WHERE id = %s AND password_hash = %s",
-            (doctor_id, old_hash)
+            "SELECT id, password_hash FROM doctors WHERE id = %s",
+            (doctor_id,)
         )
-        if not cursor.fetchone():
+        row = cursor.fetchone()
+        if not row or not _verify_password(row['password_hash'], old_password)[0]:
             return False
         cursor.execute(
             "UPDATE doctors SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
@@ -3575,6 +3832,7 @@ def create_doctor_reset_token(email: str) -> Optional[str]:
     import secrets
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT set_config('medease.auth_lookup', 'true', true), set_config('medease.login_name', %s, true)", (email,))
         cursor.execute("SELECT id FROM doctors WHERE LOWER(email) = LOWER(%s) AND is_active = TRUE", (email,))
         doctor = cursor.fetchone()
         if not doctor:
@@ -3601,8 +3859,7 @@ def create_doctor_reset_token(email: str) -> Optional[str]:
 
 def reset_doctor_password_with_token(token: str, new_password: str) -> bool:
     """Reset a doctor's password using a valid token. Returns True if successful."""
-    import hashlib
-    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+    new_hash = _hash_password(new_password)
 
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -3613,6 +3870,8 @@ def reset_doctor_password_with_token(token: str, new_password: str) -> bool:
         row = cursor.fetchone()
         if not row:
             return False
+
+        cursor.execute("SELECT set_config('medease.role', 'doctor_reset', true), set_config('medease.user_id', %s, true)", (str(row['doctor_id']),))
 
         cursor.execute(
             "UPDATE doctors SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",

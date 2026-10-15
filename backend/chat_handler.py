@@ -250,7 +250,8 @@ def build_general_context() -> tuple:
 
 async def general_chat(
     message: str,
-    session_id: str
+    session_id: str,
+    patient_id: Optional[int] = None
 ) -> str:
     """
     Handle general chat for searching across patients and health questions.
@@ -294,8 +295,9 @@ async def general_chat(
         assistant_response = response.text
 
         # Save messages to database
-        db.save_chat_message(session_id, "general", "user", message)
-        db.save_chat_message(session_id, "general", "assistant", assistant_response)
+        if patient_id is not None:
+            db.save_chat_message(session_id, "general", "user", message, patient_id)
+            db.save_chat_message(session_id, "general", "assistant", assistant_response, patient_id)
 
         return assistant_response
 

@@ -37,8 +37,56 @@ Backend (FastAPI + Python)
        +-- Google Gemini AI (Document analysis, Chat, Summarization)
        +-- Gemini Live API (Real-time voice consultation)
        +-- RxNorm API (Drug database and interaction checking)
-       +-- SQLite (Local storage)
+       +-- PostgreSQL (tenant-scoped application data)
 ```
+
+## Authentication and tenant setup
+
+The API issues opaque, HttpOnly session cookies after role-specific sign-in.
+Patient accounts are shared identities: a patient can be linked to multiple
+clinics, while clinic staff can read that patient's shared record only when
+their clinic has an active `patient_clinics` membership. Existing memberships
+are backfilled only from appointments and doctor-authored notes; other patients
+remain unlinked until they book with a clinic or an administrator registers
+them. Booking is the patient's explicit link to that clinic and gives its staff
+access to the shared profile while the link is active.
+
+For the first deployment, configure `MEDEASE_BOOTSTRAP_ADMIN_USERNAME`, a
+`MEDEASE_BOOTSTRAP_ADMIN_PASSWORD` of at least 14 characters, and
+`MEDEASE_BOOTSTRAP_CLINIC_NAME` in the backend environment. The clinic is
+created only when the database has no clinics, and the administrator only when
+the database has no administrators. Existing deployments can instead provide
+`MEDEASE_BOOTSTRAP_ADMIN_CLINIC_ID`. Fictional seed data is disabled unless
+`MEDEASE_SEED_DEMO_DATA=true`. Set `FRONTEND_URL` to
+the exact production frontend origin and use `ENVIRONMENT=production` so the
+session cookie is Secure. Never deploy the example database URL or bootstrap
+credentials.
+
+Set `MEDEASE_BOOTSTRAP_ADMIN_FIRST_NAME`, `MEDEASE_BOOTSTRAP_ADMIN_LAST_NAME`,
+and `MEDEASE_BOOTSTRAP_ADMIN_DATE_OF_BIRTH` for the first administrator.
+All account roles require a legal name and date of birth that match the
+Credence verified identity. Doctors capture these fields during provisioning;
+existing admin/doctor accounts must have their new fields completed by an
+operator before they can sign in.
+
+Set `CREDENCE_LICENSE_KEY`, `CREDENCE_PROFILE_ID`, and `CREDENCE_API_BASE` in
+the backend environment, and register the exact `FRONTEND_URL` origin in the
+Credence portal. The login flow checks the existing MedEase password first,
+then requires the user to scan the Credence wallet request. Only a successful
+verified name and date-of-birth match creates a MedEase session. The legacy
+role login endpoints remain present for compatibility but return HTTP 410 and
+never issue sessions. Missing Credence configuration fails closed.
+
+This implementation uses Credence's server-side OpenID4VP ISO mdoc flow.
+It stores short-lived login-flow state and rotated Credence API tokens in
+process memory; run one backend process per deployment until that state is
+moved to a shared store for multi-worker or multi-instance scaling. Verified
+identity claims are not persisted or logged.
+
+Set `RESEND_API_KEY` and `EMAIL_FROM` to enable password-reset and account
+credential emails. Without an email provider, newly provisioned temporary
+credentials are returned to the clinic administrator once.
+
 
 ## API Endpoints
 
@@ -79,7 +127,7 @@ Backend (FastAPI + Python)
 - FastAPI (Python web framework)
 - Google Generative AI SDK (Gemini API)
 - Google GenAI Live API (Real-time voice with function calling)
-- SQLite (Database)
+- PostgreSQL (Database; set `DATABASE_URL`)
 - WebSockets (Bidirectional audio streaming)
 
 **Frontend:**

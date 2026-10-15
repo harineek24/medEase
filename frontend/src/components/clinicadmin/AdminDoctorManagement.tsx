@@ -128,6 +128,7 @@ interface CalendarAppointment {
 interface DoctorFormState {
   first_name: string;
   last_name: string;
+  date_of_birth: string;
   title: string;
   specialty: string;
   sub_specialty: string;
@@ -145,6 +146,7 @@ interface DoctorFormState {
 const EMPTY_FORM: DoctorFormState = {
   first_name: "",
   last_name: "",
+  date_of_birth: "",
   title: "MD",
   specialty: "",
   sub_specialty: "",
@@ -300,6 +302,7 @@ export default function AdminDoctorManagement() {
       const payload = {
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
+        date_of_birth: form.date_of_birth,
         title: form.title,
         specialty: form.specialty,
         sub_specialty: form.sub_specialty.trim() || undefined,
@@ -801,6 +804,14 @@ export default function AdminDoctorManagement() {
                       placeholder="Smith"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Date of Birth <span className="text-red-400">*</span></label>
+                  <input type="date" required max={new Date().toISOString().slice(0, 10)} value={form.date_of_birth}
+                    onChange={(e) => setForm((f) => ({ ...f, date_of_birth: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-[#45BFD3] focus:ring-2 focus:ring-[#45BFD3]/30 outline-none transition" />
+                  <p className="mt-1 text-xs text-gray-500">Used only to match the doctor’s Credence verified ID at sign-in.</p>
                 </div>
 
                 {/* Row: Title / Specialty */}
